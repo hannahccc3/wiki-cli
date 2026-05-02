@@ -129,6 +129,9 @@ venue: ""
    - Related pages section with [[wikilinks]]
 
 7. **Naming**: Use kebab-case slugs (e.g., `gpt-4.md`, `chain-of-thought.md`)
+   - Entity slugs MUST match official names (e.g., `claude-2.0`, `gpt-3.5`, `llama-3-instruct-8b`) - do NOT convert dots/hyphens
+   - NEVER add prefix like `concept/`, `entity/`, or `source/` to wikilinks - just use the bare slug directly
+   - Example correct: `[[decomposition-attacks]]` NOT `[[concept/decomposition-attacks]]`
 
 Generate ALL pages now. Do NOT skip the source summary page."""
 
