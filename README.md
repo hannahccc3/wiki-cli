@@ -1,8 +1,8 @@
 # wiki-cli
 
-> Agent 驱动的本地知识库管理工具（基于 [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki) 重构）
+> Agent 驱动的本地知识库管理工具（参考 nashsu/llm_wiki 算法设计）
 
-`wiki-cli` 源自 [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki)，但在功能、架构和 Agent 集成方面都有显著增强。它是一个命令行工具，让 AI Agent 能够像人类一样构建和管理结构化的本地知识库（Wiki）。
+`wiki-cli` 参考了 [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki) 的部分算法设计（如两步思维链摄入、多信号知识图谱），但在功能、架构和 Agent 集成方面进行了完全独立的重构。
 
 ## ✨ 功能亮点
 
@@ -24,7 +24,7 @@
 
 ## 🌟 与 nashsu/llm_wiki 的区别
 
-`wiki-cli` 是从 [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki) fork 并大幅重构的项目，保留了原有的核心摄入管线（两步思维链、多模态图片处理、四信号知识图谱），但进行了以下核心增强：
+`wiki-cli` 是参考 [nashsu/llm_wiki](https://github.com/nashsu/llm_wiki) 部分算法思路独立重构的项目，保留了原有的核心摄入管线（两步思维链、多模态图片处理、四信号知识图谱），但进行了以下核心增强：
 
 ### 1. Agent-First 设计（核心差异）
 
