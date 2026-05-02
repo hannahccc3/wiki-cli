@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wiki-cli"
+version = "0.1.0"
+description = "A CLI tool for managing and querying wiki documents"
+requires-python = ">=3.10"
+dependencies = [
+    "click",
+    "pyyaml",
+    "networkx",
+    "python-louvain",
+    "requests",
+    "python-dotenv",
+    "lancedb",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp"]
+pdf = ["pdfplumber>=0.10"]
+mineru = ["magic-pdf[full]>=0.6"]
+all = ["pdfplumber>=0.10", "magic-pdf[full]>=0.6"]
+
+[project.scripts]
+wiki = "wiki_cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
