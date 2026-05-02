@@ -575,7 +575,7 @@ class WikiManager:
         s = unicodedata.normalize("NFKC", s)
         s = s.lower()
         s = re.sub(r"\s+", "-", s)
-        s = re.sub(r"[^\w\-]", "", s, flags=re.UNICODE)
+        s = re.sub(r"[^\w\-\./]", "", s, flags=re.UNICODE)  # 保留点和斜杠（entity slug需匹配官方名称如claude-2.0）
         s = re.sub(r"-+", "-", s)
         s = s.strip("-")
         s = s[:100]
