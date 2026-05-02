@@ -70,10 +70,12 @@ def _lint_page(manager: WikiManager, page_info: dict) -> list[LintIssue]:
     if not body:
         issues.append(LintIssue(str(path), len(lines), "warning", "W200", "Page has no content after frontmatter"))
 
-    # Check for broken wiki links [[slug]]
+    # Check for broken wiki links [[slug]] or [[slug|display]]
     wiki_links = re.findall(r"\[\[([^\]]+)\]\]", raw)
     for link_text in wiki_links:
-        target_slug = manager.slugify(link_text)
+        # Handle [[target|display]] format - only use target part
+        target = link_text.split('|')[0]
+        target_slug = manager.slugify(target)
         if not manager._find_page(target_slug):
             # Only warn if it's not a section link
             if not link_text.startswith("#"):
