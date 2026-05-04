@@ -160,7 +160,7 @@ class LLMClient:
         self.config = {
             "base_url": preset.get("base_url", ""),
             "model": preset.get("default_model", ""),
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "temperature": 0.7,
         }
         if config:

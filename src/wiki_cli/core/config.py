@@ -43,7 +43,7 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
         "base_url": "https://api.minimaxi.com/anthropic",
         "api_key": "",
         "model": "MiniMax-M2.7-highspeed",
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "temperature": 0.7,
         "wire": "",
     },

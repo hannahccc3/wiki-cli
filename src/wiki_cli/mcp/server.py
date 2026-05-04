@@ -20,6 +20,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from wiki_cli.core.wiki import WikiManager
 
 
@@ -823,6 +825,15 @@ TOOL_HANDLERS = {
 
 def run_mcp() -> None:
     """Start the MCP server using stdio transport."""
+    # Auto-load .env from the wiki project directory so MINIMAX_CN_API_KEY
+    # and other secrets are available without explicit env var passing.
+    _wiki_env = os.environ.get("WIKI_ENV_PATH")
+    if _wiki_env and Path(_wiki_env).exists():
+        load_dotenv(_wiki_env)
+    else:
+        # Fall back to .env in the wiki root (cwd at startup)
+        load_dotenv(Path.cwd() / ".env", override=False)
+
     try:
         from mcp.server import Server
         from mcp.server.stdio import stdio_server
