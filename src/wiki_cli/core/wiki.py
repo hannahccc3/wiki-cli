@@ -337,20 +337,28 @@ class WikiManager:
         return str(path)
 
     def delete_page(self, slug: str) -> bool:
-        """Delete a wiki page by slug.
+        """Delete a wiki page by slug with full cascade cleanup.
+
+        Cascade: removes embedding chunks, media directory (for source pages),
+        strips wikilink references and 'related:' arrays across the wiki,
+        and cleans wiki/index.md entries.
 
         Returns True if the page was found and deleted, False otherwise.
-        Also removes the page from the cache if present.
         """
         path = self._find_page(slug)
         if path is None:
             return False
 
         title = slug
-        fm, _ = self._parse_frontmatter(path.read_text(encoding="utf-8"))
-        title = fm.get("title", slug)
+        try:
+            fm, _ = self._parse_frontmatter(path.read_text(encoding="utf-8"))
+            title = fm.get("title", slug)
+        except Exception:
+            pass
 
-        path.unlink()
+        # Cascade delete: file + embeddings + media + cross-refs sweep
+        from wiki_cli.core.cascade_delete import cascade_delete_page
+        cascade_delete_page(self.project_path, path)
 
         self.append_log("delete", slug, f"Deleted page: {title}")
         return True
