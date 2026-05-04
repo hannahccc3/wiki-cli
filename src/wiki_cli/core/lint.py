@@ -52,6 +52,9 @@ class LintEngine:
         self.wm = wiki_manager
         self.project_path: Path = wiki_manager.project_path
 
+    # ── Special pages excluded from orphan/no-outlinks checks ─────────
+    _EXCLUDED_FROM_ORPHAN = {"index", "log"}
+
     # ── Public API ──────────────────────────────────────────────────────
 
     def lint(self) -> List[Dict[str, Any]]:
@@ -74,31 +77,37 @@ class LintEngine:
             # 3. Stale content
             issues.extend(self._check_stale(slug, fm, relpath))
 
-            # 4. Cross-reference minimum (outbound links)
-            issues.extend(self._check_xref_min(slug, content, relpath))
+            # 4. Cross-reference minimum (outbound links) — skip special pages
+            if slug not in self._EXCLUDED_FROM_ORPHAN:
+                issues.extend(self._check_xref_min(slug, content, relpath))
 
         # Build global slug set for orphan / broken checks
-        all_slugs = set(pages.keys())
-        inbound: Dict[str, int] = {s: 0 for s in all_slugs}
+        # Use lowercase slugs for case-insensitive wikilink matching
+        all_slugs_lower = {s.lower() for s in pages.keys()}
+        all_slugs_raw = set(pages.keys())
+        inbound: Dict[str, int] = {s: 0 for s in all_slugs_raw}
 
         for slug, info in pages.items():
-            relpath = str(info["path"].relative_to(self.project_path))
             targets = self._extract_wikilinks(info["content"])
             for target in targets:
-                if target in inbound:
-                    inbound[target] += 1
+                # Case-insensitive wikilink matching (standard wiki convention)
+                target_lower = target.lower()
+                if target_lower in all_slugs_lower:
+                    # Find the canonical slug (original-case) for this target
+                    canonical = next(s for s in all_slugs_raw if s.lower() == target_lower)
+                    inbound[canonical] += 1
                 else:
                     # 5. Broken wikilink
                     issues.append(self._issue(
-                        "BROKEN", relpath,
+                        "BROKEN", str(info["path"].relative_to(self.project_path)),
                         f"Broken [[wikilink]] → [[{target}]] (page does not exist)",
                         f"Create page '{target}' or fix the link",
                     ))
 
         for slug, count in inbound.items():
-            if count == 0:
+            if count == 0 and slug not in self._EXCLUDED_FROM_ORPHAN:
                 relpath = str(pages[slug]["path"].relative_to(self.project_path))
-                # 6. Orphan page
+                # 6. Orphan page — skip index.md / log.md
                 issues.append(self._issue(
                     "ORPHAN", relpath,
                     f"Orphan page '{slug}' — no inbound [[wikilinks]] from other pages",

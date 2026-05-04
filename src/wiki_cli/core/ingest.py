@@ -16,9 +16,54 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
+from dataclasses import dataclass
 
 from .cache import IngestCache
+from .project_mutex import ProjectLock
 from .sanitize import sanitize_page_content
+
+
+# ── Path safety ───────────────────────────────────────────────────────
+
+@dataclass
+class ParsedBlock:
+    path: str
+    content: str
+
+
+def is_safe_ingest_path(p: str) -> bool:
+    """Reject wiki write paths that escape the wiki/ tree.
+
+    The path field comes straight from LLM-generated text, so an attacker
+    can plant prompt injection like "---FILE: ../../../etc/passwd---".
+    Without this check the writer would happily overwrite system files.
+
+    Allowed:     wiki/concepts/foo.md, wiki/entities/bar.md
+    Rejected:
+      - paths not starting with wiki/
+      - absolute paths (/etc/passwd, C:/Windows/...)
+      - any .. segment
+      - NUL or control characters
+      - empty / whitespace-only paths
+    """
+    if not isinstance(p, str) or not p.strip():
+        return False
+    if re.search(r'[\x00-\x1f]', p):
+        return False
+    # Reject absolute paths (POSIX) and Windows drive letters / UNC
+    if p.startswith("/") or p.startswith("\\"):
+        return False
+    if re.match(r'^[a-zA-Z]:', p):
+        return False
+    # Normalize backslashes so a Windows-style payload doesn't sneak past
+    normalized = p.replace("\\", "/")
+    # No .. segments anywhere
+    if ".." in normalized.split("/"):
+        return False
+    # Must live under wiki/
+    if not normalized.startswith("wiki/"):
+        return False
+    return True
 
 
 # ── Step 1: Analysis prompt ─────────────────
@@ -174,48 +219,100 @@ class IngestEngine:
         base = p if p.is_dir() else p.parent
         return sorted(base.rglob("*.png")) + sorted(base.rglob("*.jpg"))
 
-    def _parse_file_blocks(self, text: str) -> list[tuple[str, str]]:
-        """Parse ---FILE: path--- ... ---END FILE--- blocks.
+    def _parse_file_blocks(self, text: str) -> tuple[list[ParsedBlock], list[str]]:
+        """Parse ---FILE: path--- ... ---END FILE--- blocks (fence-aware).
 
-        Parse FILE blocks:
-        - Handles CRLF line endings
-        - Handles whitespace variants
-        - Handles fence state tracking
+        Handles all known LLM output hazards:
+          H1 CRLF              — normalize to LF before parsing
+          H2 stream truncation — surface as warning instead of silent drop
+          H3 whitespace/case  — opener/closer line scanner is tolerant
+          H5 ---END FILE---    — inside fenced code block treated as body text
+          H6 empty path       — surface as warning
+
+        Returns:
+            blocks: list of ParsedBlock
+            warnings: list of human-readable issue descriptions
         """
-        # Normalize CRLF
-        normalized = text.replace("\r\n", "\n")
-        lines = normalized.split("\n")
+        return parse_file_blocks(text)
 
-        blocks = []
-        i = 0
+
+def parse_file_blocks(text: str) -> tuple[list[ParsedBlock], list[str]]:
+    """Module-level FILE-block parser (fence-aware). See IngestEngine._parse_file_blocks."""
+    # H1 fix: normalize CRLF
+    normalized = text.replace("\r\n", "\n")
+    lines = normalized.split("\n")
+
+    blocks: list[ParsedBlock] = []
+    warnings: list[str] = []
+
+    # Fence delimiters: triple+ backticks or tildes, CommonMark compliant.
+    # Indent ≤ 3 spaces still counts as fence; 4+ spaces is indented code block.
+    FENCE_LINE = re.compile(r'^\s{0,3}(```+|~~~+)')
+
+    i = 0
+    while i < len(lines):
+        opener_match = re.match(r'^---\s*FILE:\s*(.+?)\s*---\s*$', lines[i], re.IGNORECASE)
+        if not opener_match:
+            i += 1
+            continue
+
+        path = opener_match.group(1).strip()
+        i += 1
+
+        # Collect content until closer
+        content_lines: list[str] = []
+        fence_marker: str | None = None
+        fence_len = 0
+        closed = False
+
         while i < len(lines):
             line = lines[i]
-            # Opener pattern (case-insensitive, tolerant whitespace)
-            opener_match = re.match(r'^---\s*FILE:\s*(.+?)\s*---\s*$', line, re.IGNORECASE)
-            if not opener_match:
+
+            # H5 fix: update fence state BEFORE checking closer.
+            # Only close the fence when same char repeated ≥ length.
+            fence_match = FENCE_LINE.match(line)
+            if fence_match:
+                run = fence_match.group(1)
+                char = run[0]
+                length = len(run)
+                if fence_marker is None:
+                    fence_marker = char
+                    fence_len = length
+                elif char == fence_marker and length >= fence_len:
+                    fence_marker = None
+                    fence_len = 0
+                content_lines.append(line)
                 i += 1
                 continue
 
-            path = opener_match.group(1).strip()
+            # A line matching the closer ONLY counts when outside any fence
+            closer_match = re.match(r'^---\s*END\s+FILE\s*---\s*$', lines[i], re.IGNORECASE)
+            if fence_marker is None and closer_match:
+                closed = True
+                i += 1
+                break
+
+            content_lines.append(line)
             i += 1
 
-            # Collect content until closer
-            content_lines = []
-            closed = False
-            while i < len(lines):
-                line = lines[i]
-                closer_match = re.match(r'^---\s*END\s+FILE\s*---\s*$', line, re.IGNORECASE)
-                if closer_match:
-                    closed = True
-                    i += 1
-                    break
-                content_lines.append(line)
-                i += 1
+        if not closed:
+            # H2 fix: surface truncation instead of silent drop
+            path_label = path or "(unnamed)"
+            msg = (f"FILE block \"{path_label}\" was not closed before "
+                   "end of stream — likely truncation (model hit max_tokens, "
+                   "timeout, or connection dropped). Block dropped.")
+            warnings.append(msg)
+            continue
 
-            if closed:
-                blocks.append((path, "\n".join(content_lines).strip()))
+        if not path:
+            # H6 fix: surface empty-path blocks
+            msg = "FILE block with empty path skipped (LLM omitted the path after `---FILE:`)."
+            warnings.append(msg)
+            continue
 
-        return blocks
+        blocks.append(ParsedBlock(path=path, content="\n".join(content_lines).strip()))
+
+    return blocks, warnings
 
     def _step1_analyze(self, source_content: str, filename: str) -> dict:
         """Step 1: LLM analyzes source into structured JSON.
@@ -243,19 +340,16 @@ class IngestEngine:
         try:
             return json.loads(response)
         except json.JSONDecodeError:
-            # Try to find JSON object in response
-            match = re.search(r"\{.*\}", response, re.DOTALL)
-            if match:
+            # Try to find JSON object by brace counting (handles truncation)
+            raw = _extract_json_by_braces(response)
+            if raw:
                 try:
-                    return json.loads(match.group())
+                    return json.loads(raw)
                 except json.JSONDecodeError:
-                    # Try to fix common JSON issues (trailing commas, unquoted strings)
-                    raw = match.group()
                     raw = re.sub(r",\s*([}\]])", r"\1", raw)  # remove trailing commas
                     try:
                         return json.loads(raw)
                     except json.JSONDecodeError:
-                        # Log the problematic response for debugging
                         print(f"⚠ LLM response (first 500 chars): {raw[:500]}")
                         raise RuntimeError(f"Failed to parse analysis JSON even after cleanup. Response: {raw[:500]}")
             print(f"⚠ LLM response (first 500 chars): {response[:500]}")
@@ -290,10 +384,10 @@ class IngestEngine:
             system="You are a wiki page generator. Always use ---FILE: ...--- format.",
             max_tokens=30000,
         )
-        blocks = self._parse_file_blocks(response)
+        blocks, warnings = self._parse_file_blocks(response)
         if not blocks:
             raise RuntimeError(f"No FILE blocks found in generation response: {response[:500]}")
-        return blocks
+        return blocks, warnings
 
     def _copy_images(self, source_path: str) -> list[str]:
         """Copy associated images to wiki assets and generate vision descriptions."""
@@ -341,6 +435,11 @@ class IngestEngine:
         - All pages MUST include `sources` field in frontmatter
         - Pages MUST be written to wiki/entities/, wiki/concepts/, etc.
         """
+        with ProjectLock(self.wiki.project_path):
+            return self._ingest_impl(source_path, collection)
+
+    def _ingest_impl(self, source_path: str, collection: str | None) -> dict:
+        """Ingest implementation (called inside ProjectLock)."""
         filename = os.path.basename(source_path)
 
         # Read source
@@ -360,19 +459,24 @@ class IngestEngine:
         analysis = self._step1_analyze(source_content, filename)
 
         # Step 2: Generate pages (with schema.md, purpose.md, and index.md as context)
-        page_blocks = self._step2_generate_pages(analysis, filename)
+        page_blocks, gen_warnings = self._step2_generate_pages(analysis, filename)
 
-        # Write pages
+        # Write pages (with path safety check)
         output_paths = []
+        blocked_paths = []
         wiki_root = Path(self.wiki.project_path) / "wiki"
-        for page_path, content in page_blocks:
+        for block in page_blocks:
+            # Path safety: reject any path trying to escape wiki/
+            if not is_safe_ingest_path(block.path):
+                blocked_paths.append(block.path)
+                continue
             # Strip 'wiki/' prefix if LLM included it (avoid wiki/wiki/ nesting)
-            clean_path = page_path
+            clean_path = block.path
             if clean_path.startswith("wiki/"):
                 clean_path = clean_path[5:]
             full_path = wiki_root / clean_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(sanitize_page_content(content), encoding="utf-8")
+            full_path.write_text(sanitize_page_content(block.content), encoding="utf-8")
             output_paths.append(clean_path)
 
         # Copy images if any
@@ -398,12 +502,19 @@ class IngestEngine:
         # Save cache
         self.cache.save(filename, source_content, output_paths)
 
+        # Combine parser warnings (H2/H6) and blocked paths
+        all_warnings = gen_warnings[:]
+        for p in blocked_paths:
+            all_warnings.append(f"Blocked unsafe path: {p}")
+
         return {
             "status": "ingested",
             "filename": filename,
             "output_paths": output_paths,
             "analysis": analysis,
             "review_items": len(review_items),
+            "warnings": all_warnings,
+            "blocked_paths": blocked_paths,
         }
 
     def _append_log(self, filename: str, analysis: dict, output_paths: list[str]):
@@ -419,3 +530,32 @@ class IngestEngine:
         }
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+# ── Helper ──────────────────────────────────────────────────────────────────
+
+def _extract_json_by_braces(text: str) -> str | None:
+    """Extract a JSON object by brace counting (handles truncated responses).
+
+    Finds the first '{' and matches braces until we have a balanced closing '}'.
+    If the text is truncated mid-content, this returns the largest balanced prefix.
+    Returns None if no opening brace is found.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    end = start
+    for i, ch in enumerate(text[start:], start):
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+
+    if depth == 0:
+        return text[start:end]
+    return None
