@@ -66,6 +66,78 @@ def is_safe_ingest_path(p: str) -> bool:
     return True
 
 
+def parse_llm_json(raw: str, purpose: str) -> dict:
+    """Parse JSON from LLM output, stripping markdown fences if present.
+
+    The LLM may return fenced or bare JSON. This function handles both,
+    and falls back to returning an empty dict with an error field if
+    parsing completely fails (rather than crashing the pipeline).
+
+    Args:
+        raw: Raw text returned from LLM.generate()
+        purpose: Human-readable label for error messages (e.g. "analysis", "page generation")
+
+    Returns:
+        Parsed dict. On failure returns {"error": "...", "_raw": raw}
+    """
+    import json as _json
+
+    text = raw.strip()
+
+    # Strip markdown fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Find the first line with ``` and the last
+        first_fence = None
+        last_fence = None
+        for i, line in enumerate(lines):
+            if line.startswith("```") and first_fence is None:
+                first_fence = i
+            elif line.startswith("```"):
+                last_fence = i
+        if first_fence is not None and last_fence is not None and last_fence > first_fence:
+            text = "\n".join(lines[first_fence + 1 : last_fence])
+        elif first_fence is not None:
+            # Only opening fence found; strip it
+            text = "\n".join(lines[first_fence + 1 :])
+        else:
+            text = "\n".join(lines)
+
+    text = text.strip()
+
+    # Try direct JSON parse first (most common case)
+    try:
+        return _json.loads(text)
+    except _json.JSONDecodeError:
+        pass
+
+    # Try to extract first JSON object/array from the text
+    # This handles cases where LLM adds commentary before/after JSON
+    for start_idx in range(len(text)):
+        if text[start_idx] in ("{", "["):
+            break
+    else:
+        return {
+            "error": f"Could not find JSON {purpose} in LLM output",
+            "_raw": raw,
+        }
+
+    # Try parsing from each '{' or '[' position (brute-force for embedded JSON)
+    for i in range(start_idx, len(text)):
+        if text[i] not in ("{", "["):
+            continue
+        try:
+            result = _json.loads(text[i:])
+            return result
+        except _json.JSONDecodeError:
+            continue
+
+    return {
+        "error": f"Failed to parse JSON {purpose} from LLM output",
+        "_raw": raw,
+    }
+
+
 # ── Step 1: Analysis prompt ─────────────────
 
 ANALYSIS_PROMPT = """You are analyzing a source document for a wiki knowledge base.
@@ -234,6 +306,170 @@ class IngestEngine:
             warnings: list of human-readable issue descriptions
         """
         return parse_file_blocks(text)
+
+    def _step1_analyze(self, source_content: str, filename: str) -> dict:
+        """Step 1: LLM analyzes source into structured JSON.
+
+        Ingest behavior:
+        - Read schema.md and purpose.md as context
+        - Pass source content with filename
+        """
+        # Read schema and purpose as context
+        schema = self.wiki.read_schema()
+        purpose = self.wiki.read_purpose()
+
+        prompt = ANALYSIS_PROMPT.format(
+            schema=schema[:3000] if schema else "(no schema defined)",
+            purpose=purpose[:2000] if purpose else "(no purpose defined)",
+            source=source_content[:15000],  # truncate for context
+            filename=filename,
+        )
+        raw = self.llm.generate(prompt)
+        return parse_llm_json(raw, "analysis")
+
+    def _step2_generate_pages(self, analysis: dict, filename: str) -> list[tuple[str, str]]:
+        """Step 2: LLM generates wiki pages from analysis."""
+        schema = self.wiki.read_schema()
+        purpose = self.wiki.read_purpose()
+        index = self.wiki.read_index()
+        source_slug = self.wiki.slugify(Path(filename).stem)
+
+        prompt = PAGE_GENERATION_PROMPT.format(
+            schema=schema[:4000] if schema else "(no schema defined)",
+            purpose=purpose[:2000] if purpose else "(no purpose defined)",
+            current_index=index[:3000] if index else "(no index yet)",
+            analysis=json.dumps(analysis, ensure_ascii=False, indent=2),
+            filename=filename,
+            source_slug=source_slug,
+        )
+        raw = self.llm.generate(prompt)
+        blocks, warnings = self._parse_file_blocks(raw)
+        return blocks, warnings
+
+    def _copy_images(self, source_path: str) -> list[str]:
+        """Copy associated images to wiki media dir."""
+        images = self._find_images(source_path)
+        if not images:
+            return []
+        media_dir = Path(self.wiki.project_path) / "wiki" / "media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        copied = []
+        for img in images:
+            dest = media_dir / img.name
+            import shutil
+            shutil.copy2(img, dest)
+            copied.append(str(dest))
+        return copied
+
+    def ingest(self, source_path: str, collection: str | None = None) -> dict:
+        """Ingest a source file into the wiki.
+
+        Ingest behavior:
+        1. Read source + schema.md + purpose.md
+        2. LLM analyzes source -> structured JSON
+        3. LLM generates wiki pages using FILE blocks
+        4. Parse blocks, write pages, update index/log/overview
+
+        Critical rules:
+        - Source summary page MUST be at wiki/sources/{slug}.md
+        - All pages MUST include `sources` field in frontmatter
+        - Pages MUST be written to wiki/entities/, wiki/concepts/, etc.
+        """
+        with ProjectLock(self.wiki.project_path):
+            return self._ingest_impl(source_path, collection)
+
+    def _ingest_impl(self, source_path: str, collection: str | None) -> dict:
+        """Ingest implementation (called inside ProjectLock)."""
+        filename = os.path.basename(source_path)
+
+        # Read source
+        source_content = self._read_source(source_path)
+
+        # Check cache
+        cached = self.cache.check(filename, source_content)
+        if cached is not None:
+            return {
+                "status": "cached",
+                "filename": filename,
+                "output_paths": cached,
+                "analysis": None,
+            }
+
+        # Step 1: Analyze (with schema.md and purpose.md as context)
+        analysis = self._step1_analyze(source_content, filename)
+
+        # Step 2: Generate pages (with schema.md, purpose.md, and index.md as context)
+        page_blocks, gen_warnings = self._step2_generate_pages(analysis, filename)
+
+        # Write pages (with path safety check)
+        output_paths = []
+        blocked_paths = []
+        wiki_root = Path(self.wiki.project_path) / "wiki"
+        for block in page_blocks:
+            # Path safety: reject any path trying to escape wiki/
+            if not is_safe_ingest_path(block.path):
+                blocked_paths.append(block.path)
+                continue
+            # Strip 'wiki/' prefix if LLM included it (avoid wiki/wiki/ nesting)
+            clean_path = block.path
+            if clean_path.startswith("wiki/"):
+                clean_path = clean_path[5:]
+            full_path = wiki_root / clean_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(sanitize_page_content(block.content), encoding="utf-8")
+            output_paths.append(clean_path)
+
+        # Copy images if any
+        self._copy_images(source_path)
+
+        # Update index, overview, and log
+        self.wiki.update_index()
+        self.wiki.update_overview()
+
+        # Update ingest log
+        self._append_log(filename, analysis, output_paths)
+
+        # Auto-flag review items for low-confidence or ambiguous extractions
+        review_items = []
+        try:
+            from wiki_cli.core.review import ReviewSystem
+            review = ReviewSystem(str(self.wiki.project_path))
+            source_slug = Path(source_path).stem
+            review_items = review.flag_ingest_items(analysis, source_slug)
+        except Exception:
+            pass
+
+        # Save cache
+        self.cache.save(filename, source_content, output_paths)
+
+        # Combine parser warnings (H2/H6) and blocked paths
+        all_warnings = gen_warnings[:]
+        for p in blocked_paths:
+            all_warnings.append(f"Blocked unsafe path: {p}")
+
+        return {
+            "status": "ingested",
+            "filename": filename,
+            "output_paths": output_paths,
+            "analysis": analysis,
+            "review_items": len(review_items),
+            "warnings": all_warnings,
+            "blocked_paths": blocked_paths,
+        }
+
+    def _append_log(self, filename: str, analysis: dict, output_paths: list[str]):
+        """Append to ingest log."""
+        log_path = Path(self.wiki.project_path) / ".llm-wiki" / "ingest-log.jsonl"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "filename": filename,
+            "title": analysis.get("title", ""),
+            "tags": analysis.get("tags", []),
+            "pages": output_paths,
+            "confidence": analysis.get("confidence", 0),
+        }
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def parse_file_blocks(text: str) -> tuple[list[ParsedBlock], list[str]]:
