@@ -175,6 +175,48 @@ def delete(ctx: click.Context, slug: str, yes: bool) -> None:
         click.echo(f"❌ Failed to delete: {slug}")
 
 
+@cli.command("dedup-detect")
+@click.pass_context
+def dedup_detect(ctx: click.Context) -> None:
+    """Detect potential duplicate entity/concept pages using LLM."""
+    from wiki_cli.core.wiki import WikiManager
+    import json
+
+    manager = WikiManager(ctx.obj["wiki_path"])
+    click.echo("🔍 Scanning for duplicates ...")
+    groups = manager.detect_duplicates()
+    if not groups:
+        click.echo("✅ No duplicates found.")
+        return
+    click.echo(f"Found {len(groups)} duplicate group(s):\n")
+    for i, g in enumerate(groups, 1):
+        click.echo(f"  Group {i} [{g['confidence'].upper()}] — {g['reason']}")
+        for slug in g["slugs"]:
+            click.echo(f"    - {slug}")
+        click.echo()
+
+
+@cli.command("dedup-merge")
+@click.argument("slugs", nargs=-1, required=True)
+@click.option("--canonical", "-c", required=True, help="Slug to keep as the canonical page.")
+@click.pass_context
+def dedup_merge(ctx: click.Context, slugs: tuple, canonical: str) -> None:
+    """Merge duplicate pages into a single canonical page.
+
+    Example: wiki dedup-merge gpt-4 gpt4 gpt-4o --canonical gpt-4
+    """
+    from wiki_cli.core.wiki import WikiManager
+
+    manager = WikiManager(ctx.obj["wiki_path"])
+    click.echo(f"🔀 Merging {len(slugs)} pages into canonical '{canonical}' ...")
+    result = manager.merge_duplicate(list(slugs), canonical)
+    click.echo(f"✅ Merge complete:")
+    click.echo(f"   Canonical page: {result['canonical']}")
+    click.echo(f"   Pages rewritten: {result['rewritten']}")
+    click.echo(f"   Pages deleted: {result['deleted']}")
+    click.echo(f"   Backup dir: {result['backup_dir']}")
+
+
 @cli.command("move")
 @click.argument("old_slug")
 @click.argument("new_slug")

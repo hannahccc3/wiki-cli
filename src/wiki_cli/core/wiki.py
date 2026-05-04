@@ -363,6 +363,120 @@ class WikiManager:
         self.append_log("delete", slug, f"Deleted page: {title}")
         return True
 
+    # ── Duplicate detection & merge ────────────────────────────────────
+
+    def detect_duplicates(self) -> list[dict]:
+        """Scan entity + concept pages for potential duplicates using LLM.
+
+        Returns a list of duplicate groups, each with:
+          slugs: list[str]
+          reason: str
+          confidence: "high" | "medium" | "low"
+        """
+        from wiki_cli.core.dedup import detect_duplicate_groups, extract_entity_summaries
+        summaries = extract_entity_summaries(self.project_path)
+        if not summaries:
+            return []
+
+        def llm_call(system: str, user: str) -> str:
+            from wiki_cli.core.llm import LLMClient
+            client = LLMClient()
+            return client.generate(user, system=system)
+
+        groups = detect_duplicate_groups(summaries, llm_call)
+        return [{"slugs": g.slugs, "reason": g.reason, "confidence": g.confidence} for g in groups]
+
+    def merge_duplicate(self, slugs: list[str], canonical_slug: str) -> dict:
+        """Merge duplicate pages into a single canonical page.
+
+        Steps:
+          1. LLM merges page bodies
+          2. Deterministic frontmatter union (sources, tags, related)
+          3. Rewrite all cross-references across the wiki
+          4. Backup all touched files to .llm-wiki/page-history/
+          5. Write canonical page, rewrite refs, delete merged pages
+
+        Returns a summary dict with counts of rewrites and deletions.
+        """
+        import shutil
+        from wiki_cli.core.dedup import extract_entity_summaries, merge_duplicate_group_with_contents
+        from wiki_cli.core.llm import LLMClient
+        from wiki_cli.core.sanitize import sanitize_page_content
+
+        summaries = extract_entity_summaries(self.project_path)
+
+        # Load all wiki pages for the cross-reference sweep
+        all_pages: list[dict] = []
+        for ptype, dirname in self.TYPE_DIRS.items():
+            dirpath = self.project_path / dirname
+            if not dirpath.exists():
+                continue
+            for f in sorted(dirpath.glob("*.md")):
+                slug = f.stem
+                try:
+                    raw = f.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                all_pages.append({"path": str(f.relative_to(self.project_path)), "slug": slug, "content": raw})
+
+        # Load group pages with content
+        group_dict = {p["slug"]: p for p in all_pages}
+        group = [group_dict[s] for s in slugs if s in group_dict]
+        if len(group) < 2:
+            raise ValueError(f"Need at least 2 pages in group, got {[s for s in slugs if s in group_dict]}")
+
+        other_pages = [p for p in all_pages if p["slug"] not in slugs]
+
+        def llm_call(system: str, user: str) -> str:
+            client = LLMClient()
+            return client.generate(user, system=system)
+
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        result = merge_duplicate_group_with_contents(
+            group=group,
+            canonical_slug=canonical_slug,
+            llm_call=llm_call,
+            other_pages=other_pages,
+            today=today,
+        )
+
+        # Backup
+        history_dir = self.project_path / ".llm-wiki" / "page-history"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        for item in result.backup:
+            dest = history_dir / Path(item["path"]).name
+            dest.write_text(item["content"], encoding="utf-8")
+
+        # Write canonical page
+        canonical_abs = self.project_path / result.canonical_path
+        canonical_abs.parent.mkdir(parents=True, exist_ok=True)
+        canonical_abs.write_text(sanitize_page_content(result.canonical_content), encoding="utf-8")
+
+        # Rewrite other pages
+        rewrite_count = 0
+        for rw in result.rewrites:
+            p = self.project_path / rw["path"]
+            p.write_text(sanitize_page_content(rw["new_content"]), encoding="utf-8")
+            rewrite_count += 1
+
+        # Delete merged pages
+        delete_count = 0
+        for dp in result.pages_to_delete:
+            p = self.project_path / dp
+            if p.exists():
+                p.unlink()
+                delete_count += 1
+
+        self.append_log("merge", canonical_slug, f"Merged {len(result.pages_to_delete)} pages into {canonical_slug}")
+        return {
+            "canonical": result.canonical_path,
+            "rewritten": rewrite_count,
+            "deleted": delete_count,
+            "backup_dir": str(history_dir),
+        }
+
     def move_page(self, old_slug: str, new_slug: str) -> str | None:
         """Rename a wiki page (move to a new slug).
 
