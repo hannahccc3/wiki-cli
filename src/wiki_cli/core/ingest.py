@@ -196,6 +196,10 @@ PAGE_GENERATION_PROMPT = """You are a wiki page generator. Based on the analysis
 
 Source filename: {filename}
 
+## Original Source Content (for reference)
+
+{truncated_source}
+
 ---
 
 Generate wiki pages using this EXACT format for each page:
@@ -327,12 +331,24 @@ class IngestEngine:
         raw = self.llm.generate(prompt)
         return parse_llm_json(raw, "analysis")
 
-    def _step2_generate_pages(self, analysis: dict, filename: str) -> list[tuple[str, str]]:
-        """Step 2: LLM generates wiki pages from analysis."""
+    def _step2_generate_pages(
+        self, analysis: dict, filename: str, source_content: str
+    ) -> list[tuple[str, str]]:
+        """Step 2: LLM generates wiki pages from analysis.
+
+        Passes original source content (truncated) so the LLM can reference
+        actual passages, not just the analysis summary (nashsu/llm_wiki behavior).
+        """
         schema = self.wiki.read_schema()
         purpose = self.wiki.read_purpose()
         index = self.wiki.read_index()
         source_slug = self.wiki.slugify(Path(filename).stem)
+        # Truncate source content to 50,000 chars (same threshold as nashsu)
+        truncated_source = (
+            source_content[:50000] + "\n\n[... content truncated ...]"
+            if len(source_content) > 50000
+            else source_content
+        )
 
         prompt = PAGE_GENERATION_PROMPT.format(
             schema=schema[:4000] if schema else "(no schema defined)",
@@ -341,6 +357,7 @@ class IngestEngine:
             analysis=json.dumps(analysis, ensure_ascii=False, indent=2),
             filename=filename,
             source_slug=source_slug,
+            truncated_source=truncated_source,
         )
         raw = self.llm.generate(prompt)
         blocks, warnings = self._parse_file_blocks(raw)
@@ -398,12 +415,20 @@ class IngestEngine:
         # Step 1: Analyze (with schema.md and purpose.md as context)
         analysis = self._step1_analyze(source_content, filename)
 
-        # Step 2: Generate pages (with schema.md, purpose.md, and index.md as context)
-        page_blocks, gen_warnings = self._step2_generate_pages(analysis, filename)
+        # Step 2: Generate pages (with schema.md, purpose.md, index.md, AND original source as context)
+        # Note: nashsu/llm_wiki also passes truncated source content in Step 2 so the LLM
+        # can reference actual passages, not just the analysis summary.
+        page_blocks, gen_warnings = self._step2_generate_pages(
+            analysis, filename, source_content
+        )
 
         # Write pages (with path safety check)
-        output_paths = []
-        blocked_paths = []
+        # Track "hard failures" (OS-level: disk full, permission denied) separately
+        # from "soft drops" (blocked path, empty path) — hard failures must prevent
+        # cache from being saved so re-ingest can retry and recover the failed pages.
+        output_paths: list[str] = []
+        blocked_paths: list[str] = []
+        hard_failures: list[str] = []
         wiki_root = Path(self.wiki.project_path) / "wiki"
         for block in page_blocks:
             # Path safety: reject any path trying to escape wiki/
@@ -416,8 +441,50 @@ class IngestEngine:
                 clean_path = clean_path[5:]
             full_path = wiki_root / clean_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(sanitize_page_content(block.content), encoding="utf-8")
-            output_paths.append(clean_path)
+            try:
+                full_path.write_text(sanitize_page_content(block.content), encoding="utf-8")
+                output_paths.append(clean_path)
+            except OSError as e:
+                # Disk full, permission denied, I/O error — hard failure, retry later
+                hard_failures.append(f"{clean_path}: {e}")
+
+        # Check: did LLM generate a source summary page?
+        source_slug = self.wiki.slugify(Path(filename).stem)
+        has_source_summary = any(p.startswith(f"sources/{source_slug}") for p in output_paths)
+
+        # Fallback: if LLM missed the source summary, create a minimal one
+        if not has_source_summary and output_paths:
+            fallback_path = wiki_root / "sources" / f"{source_slug}.md"
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            date = datetime.now().strftime("%Y-%m-%d")
+            analysis_text = ""
+            if analysis:
+                # Include first 2000 chars of analysis as body
+                import json
+                try:
+                    analysis_text = json.dumps(analysis, ensure_ascii=False, indent=2)[:2000]
+                except Exception:
+                    analysis_text = str(analysis)[:2000]
+            fallback_content = (
+                f"---\n"
+                f'type: source\n'
+                f'title: "{filename}"\n'
+                f'created: {date}\n'
+                f'updated: {date}\n'
+                f'sources: ["{filename}"]\n'
+                f"tags: []\n"
+                f"related: []\n"
+                f"---\n"
+                f"\n"
+                f"# {filename}\n"
+                f"\n"
+                f"{analysis_text or '(Analysis not available)'}\n"
+            )
+            try:
+                fallback_path.write_text(fallback_content, encoding="utf-8")
+                output_paths.append(f"sources/{source_slug}.md")
+            except OSError as e:
+                hard_failures.append(f"sources/{source_slug}.md: {e}")
 
         # Copy images if any
         self._copy_images(source_path)
@@ -439,13 +506,22 @@ class IngestEngine:
         except Exception:
             pass
 
-        # Save cache
-        self.cache.save(filename, source_content, output_paths)
+        # Save cache only when ALL writes succeeded (no hard failures).
+        # If any block failed to write (OS error), skip cache so re-ingest retries.
+        if hard_failures:
+            import sys
+            print(f"⚠ Hard failures during ingest — skipping cache save for '{filename}':", file=sys.stderr)
+            for hf in hard_failures:
+                print(f"  • {hf}", file=sys.stderr)
+        else:
+            self.cache.save(filename, source_content, output_paths)
 
-        # Combine parser warnings (H2/H6) and blocked paths
+        # Combine parser warnings (H2/H6), blocked paths, and hard failures
         all_warnings = gen_warnings[:]
         for p in blocked_paths:
             all_warnings.append(f"Blocked unsafe path: {p}")
+        for hf in hard_failures:
+            all_warnings.append(f"Hard failure: {hf}")
 
         return {
             "status": "ingested",
@@ -455,6 +531,7 @@ class IngestEngine:
             "review_items": len(review_items),
             "warnings": all_warnings,
             "blocked_paths": blocked_paths,
+            "hard_failures": hard_failures,
         }
 
     def _append_log(self, filename: str, analysis: dict, output_paths: list[str]):
@@ -549,223 +626,6 @@ def parse_file_blocks(text: str) -> tuple[list[ParsedBlock], list[str]]:
         blocks.append(ParsedBlock(path=path, content="\n".join(content_lines).strip()))
 
     return blocks, warnings
-
-    def _step1_analyze(self, source_content: str, filename: str) -> dict:
-        """Step 1: LLM analyzes source into structured JSON.
-
-        Ingest behavior:
-        - Read schema.md and purpose.md as context
-        - Pass source content with filename
-        """
-        # Read schema and purpose as context
-        schema = self.wiki.read_schema()
-        purpose = self.wiki.read_purpose()
-
-        prompt = ANALYSIS_PROMPT.format(
-            schema=schema[:3000] if schema else "(no schema defined)",
-            purpose=purpose[:2000] if purpose else "(no purpose defined)",
-            source=source_content[:15000],  # truncate for context
-            filename=filename,
-        )
-        response = self.llm.generate(prompt, system="You are an expert knowledge analyst.")
-        # Extract JSON from response
-        response = response.strip()
-        if response.startswith("```"):
-            response = re.sub(r"^```(?:json)?\s*\n?", "", response)
-            response = re.sub(r"\n?```\s*$", "", response)
-        try:
-            return json.loads(response)
-        except json.JSONDecodeError:
-            # Try to find JSON object by brace counting (handles truncation)
-            raw = _extract_json_by_braces(response)
-            if raw:
-                try:
-                    return json.loads(raw)
-                except json.JSONDecodeError:
-                    raw = re.sub(r",\s*([}\]])", r"\1", raw)  # remove trailing commas
-                    try:
-                        return json.loads(raw)
-                    except json.JSONDecodeError:
-                        print(f"⚠ LLM response (first 500 chars): {raw[:500]}")
-                        raise RuntimeError(f"Failed to parse analysis JSON even after cleanup. Response: {raw[:500]}")
-            print(f"⚠ LLM response (first 500 chars): {response[:500]}")
-            raise RuntimeError(f"Failed to parse analysis JSON. Response: {response[:500]}")
-
-    def _step2_generate_pages(self, analysis: dict, filename: str) -> list[tuple[str, str]]:
-        """Step 2: LLM generates wiki pages from analysis.
-
-        Ingest behavior:
-        - Read schema.md, purpose.md, and current index.md as context
-        - Force exact file paths (wiki/sources/..., wiki/entities/..., wiki/concepts/...)
-        - Use standard frontmatter format
-        """
-        # Read schema, purpose, and current index
-        schema = self.wiki.read_schema()
-        purpose = self.wiki.read_purpose()
-        current_index = self.wiki.read_index()
-
-        # Create source slug for the mandatory source summary page
-        source_slug = self.wiki.slugify(Path(filename).stem)
-
-        prompt = PAGE_GENERATION_PROMPT.format(
-            schema=schema[:3000] if schema else "(no schema defined)",
-            purpose=purpose[:2000] if purpose else "(no purpose defined)",
-            current_index=current_index[:2000] if current_index else "(empty index)",
-            analysis=json.dumps(analysis, indent=2, ensure_ascii=False),
-            filename=filename,
-            source_slug=source_slug,
-        )
-        response = self.llm.generate(
-            prompt,
-            system="You are a wiki page generator. Always use ---FILE: ...--- format.",
-            max_tokens=30000,
-        )
-        blocks, warnings = self._parse_file_blocks(response)
-        if not blocks:
-            raise RuntimeError(f"No FILE blocks found in generation response: {response[:500]}")
-        return blocks, warnings
-
-    def _copy_images(self, source_path: str) -> list[str]:
-        """Copy associated images to wiki assets and generate vision descriptions."""
-        images = self._find_images(source_path)
-        copied = []
-        descriptions = {}
-
-        try:
-            from wiki_cli.core.vision import VisionClient
-            source_text = self._read_source(source_path)[:1000] if Path(source_path).exists() else ""
-            vision = VisionClient()
-            for img in images:
-                desc = vision.describe_image(str(img), context=source_text)
-                if desc:
-                    descriptions[img.name] = desc
-        except Exception:
-            pass
-
-        desc_dir = Path(self.wiki.project_path) / ".llm-wiki" / "assets" / "image-descriptions"
-        if descriptions:
-            desc_dir.mkdir(parents=True, exist_ok=True)
-            desc_file = desc_dir / f"{Path(source_path).stem}-descriptions.json"
-            desc_file.write_text(json.dumps(descriptions, indent=2, ensure_ascii=False), encoding="utf-8")
-
-        for img in images:
-            dest_dir = Path(self.wiki.project_path) / ".llm-wiki" / "assets" / "images"
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / img.name
-            if not dest.exists():
-                dest.write_bytes(img.read_bytes())
-            copied.append(str(dest))
-        return copied
-
-    def ingest(self, source_path: str, collection: str | None = None) -> dict:
-        """Ingest a source file into the wiki.
-
-        Ingest behavior:
-        1. Read source + schema.md + purpose.md
-        2. LLM analyzes source -> structured JSON
-        3. LLM generates wiki pages using FILE blocks
-        4. Parse blocks, write pages, update index/log/overview
-
-        Critical rules:
-        - Source summary page MUST be at wiki/sources/{slug}.md
-        - All pages MUST include `sources` field in frontmatter
-        - Pages MUST be written to wiki/entities/, wiki/concepts/, etc.
-        """
-        with ProjectLock(self.wiki.project_path):
-            return self._ingest_impl(source_path, collection)
-
-    def _ingest_impl(self, source_path: str, collection: str | None) -> dict:
-        """Ingest implementation (called inside ProjectLock)."""
-        filename = os.path.basename(source_path)
-
-        # Read source
-        source_content = self._read_source(source_path)
-
-        # Check cache
-        cached = self.cache.check(filename, source_content)
-        if cached is not None:
-            return {
-                "status": "cached",
-                "filename": filename,
-                "output_paths": cached,
-                "analysis": None,
-            }
-
-        # Step 1: Analyze (with schema.md and purpose.md as context)
-        analysis = self._step1_analyze(source_content, filename)
-
-        # Step 2: Generate pages (with schema.md, purpose.md, and index.md as context)
-        page_blocks, gen_warnings = self._step2_generate_pages(analysis, filename)
-
-        # Write pages (with path safety check)
-        output_paths = []
-        blocked_paths = []
-        wiki_root = Path(self.wiki.project_path) / "wiki"
-        for block in page_blocks:
-            # Path safety: reject any path trying to escape wiki/
-            if not is_safe_ingest_path(block.path):
-                blocked_paths.append(block.path)
-                continue
-            # Strip 'wiki/' prefix if LLM included it (avoid wiki/wiki/ nesting)
-            clean_path = block.path
-            if clean_path.startswith("wiki/"):
-                clean_path = clean_path[5:]
-            full_path = wiki_root / clean_path
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(sanitize_page_content(block.content), encoding="utf-8")
-            output_paths.append(clean_path)
-
-        # Copy images if any
-        self._copy_images(source_path)
-
-        # Update index, overview, and log
-        self.wiki.update_index()
-        self.wiki.update_overview()
-
-        # Update ingest log
-        self._append_log(filename, analysis, output_paths)
-
-        # Auto-flag review items for low-confidence or ambiguous extractions
-        review_items = []
-        try:
-            from wiki_cli.core.review import ReviewSystem
-            review = ReviewSystem(str(self.wiki.project_path))
-            source_slug = Path(source_path).stem
-            review_items = review.flag_ingest_items(analysis, source_slug)
-        except Exception:
-            pass
-
-        # Save cache
-        self.cache.save(filename, source_content, output_paths)
-
-        # Combine parser warnings (H2/H6) and blocked paths
-        all_warnings = gen_warnings[:]
-        for p in blocked_paths:
-            all_warnings.append(f"Blocked unsafe path: {p}")
-
-        return {
-            "status": "ingested",
-            "filename": filename,
-            "output_paths": output_paths,
-            "analysis": analysis,
-            "review_items": len(review_items),
-            "warnings": all_warnings,
-            "blocked_paths": blocked_paths,
-        }
-
-    def _append_log(self, filename: str, analysis: dict, output_paths: list[str]):
-        """Append to ingest log."""
-        log_path = Path(self.wiki.project_path) / ".llm-wiki" / "ingest-log.jsonl"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "filename": filename,
-            "title": analysis.get("title", ""),
-            "tags": analysis.get("tags", []),
-            "pages": output_paths,
-            "confidence": analysis.get("confidence", 0),
-        }
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 # ── Helper ──────────────────────────────────────────────────────────────────
