@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from .cache import IngestCache
 from .project_mutex import ProjectLock
 from .sanitize import sanitize_page_content
+from .detect_language import detect_language
+from .output_language import build_language_directive
 
 
 # ── Path safety ───────────────────────────────────────────────────────
@@ -64,6 +66,56 @@ def is_safe_ingest_path(p: str) -> bool:
     if not normalized.startswith("wiki/"):
         return False
     return True
+
+
+def content_matches_target_language(content: str, target: str) -> bool:
+    """Check if the page body matches the target output language.
+
+    Per-file language guard: strips frontmatter + code/math blocks, runs
+    detectLanguage on the remainder, and returns whether the content is in
+    a language family compatible with the target.
+
+    This catches cases where the LLM follows the format spec but writes
+    a page in the wrong language.
+
+    Reference: nashsu/llm_wiki contentMatchesTargetLanguage() ingest.ts:738-760
+
+    Rules:
+    - CJK family: Chinese / Japanese / Korean are mutually compatible
+    - Non-CJK: reject Arabic, Hindi, Thai, Hebrew (clear cross-family errors)
+    - Short content (<20 chars stripped): skip check
+    - /entities/ and /sources/ pages: skip check (cite cross-language
+      proper nouns legitimately)
+    - /concepts/ pages: always check
+    """
+    import re
+
+    # Strip frontmatter
+    fm_end = content.find("\n---", 4)
+    body = content[fm_end + 5:] if fm_end > 0 else content
+
+    # Strip code + math blocks
+    body = re.sub(r"```[\s\S]*?```", "", body)
+    body = re.sub(r"\$\$[\s\S]*?\$\$", "", body)
+    body = re.sub(r"\$[^$\n]*\$", "", body)
+
+    sample = body[:1500]
+    if len(sample.strip()) < 20:
+        return True  # too short to judge
+
+    detected = detect_language(sample)
+
+    # Compatible families: CJK targets accept CJK variants
+    cjk = {"Chinese", "Japanese", "Korean"}
+    target_is_cjk = target in cjk
+    detected_is_cjk = detected in cjk
+    if target_is_cjk:
+        return detected_is_cjk
+
+    # Non-CJK target: reject clear cross-family mismatches
+    return not detected_is_cjk and detected not in (
+        "Arabic", "Hindi", "Thai", "Hebrew"
+    )
 
 
 def parse_llm_json(raw: str, purpose: str) -> dict:
@@ -149,6 +201,8 @@ ANALYSIS_PROMPT = """You are analyzing a source document for a wiki knowledge ba
 
 ### Purpose
 {purpose}
+
+{language_directive}
 
 ## Source Document
 
@@ -317,15 +371,28 @@ class IngestEngine:
         Ingest behavior:
         - Read schema.md and purpose.md as context
         - Pass source content with filename
+        - Truncate to 50,000 chars (aligned with nashsu/llm_wiki)
+        - Inject language directive so LLM writes in target language
         """
         # Read schema and purpose as context
         schema = self.wiki.read_schema()
         purpose = self.wiki.read_purpose()
 
+        # Truncate to 50,000 chars (same threshold as nashsu/llm_wiki)
+        truncated_source = (
+            source_content[:50000] + "\n\n[... content truncated ...]"
+            if len(source_content) > 50000
+            else source_content
+        )
+
+        # Build language directive from source content sample
+        lang_directive = build_language_directive(truncated_source)
+
         prompt = ANALYSIS_PROMPT.format(
             schema=schema[:3000] if schema else "(no schema defined)",
             purpose=purpose[:2000] if purpose else "(no purpose defined)",
-            source=source_content[:15000],  # truncate for context
+            language_directive=lang_directive,
+            source=truncated_source,
             filename=filename,
         )
         raw = self.llm.generate(prompt)
@@ -422,14 +489,19 @@ class IngestEngine:
             analysis, filename, source_content
         )
 
-        # Write pages (with path safety check)
+        # Write pages (with path safety check + language guard)
         # Track "hard failures" (OS-level: disk full, permission denied) separately
         # from "soft drops" (blocked path, empty path) — hard failures must prevent
         # cache from being saved so re-ingest can retry and recover the failed pages.
         output_paths: list[str] = []
         blocked_paths: list[str] = []
         hard_failures: list[str] = []
+        language_mismatches: list[str] = []
         wiki_root = Path(self.wiki.project_path) / "wiki"
+
+        # Detect target language from source content sample (for language guard)
+        target_lang = detect_language(source_content[:2000])
+
         for block in page_blocks:
             # Path safety: reject any path trying to escape wiki/
             if not is_safe_ingest_path(block.path):
@@ -439,6 +511,25 @@ class IngestEngine:
             clean_path = block.path
             if clean_path.startswith("wiki/"):
                 clean_path = clean_path[5:]
+
+            # Language guard: skip /concepts/ pages whose body doesn't match target language.
+            # /entities/ and /sources/ are exempt (cite cross-language proper nouns legitimately).
+            # nashsu/llm_wiki applies this check in writeFileBlocks.
+            is_entity_or_source = (
+                clean_path.startswith("entities/")
+                or clean_path.startswith("sources/")
+            )
+            is_log = clean_path.endswith("/log.md") or clean_path == "log.md"
+            if (
+                not is_log
+                and not is_entity_or_source
+                and not content_matches_target_language(block.content, target_lang)
+            ):
+                msg = f'Dropped "{clean_path}" — body language ({detect_language(block.content[:500])}) does not match target {target_lang}'
+                language_mismatches.append(msg)
+                continue
+
+            # Write the page to disk
             full_path = wiki_root / clean_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -447,7 +538,6 @@ class IngestEngine:
             except OSError as e:
                 # Disk full, permission denied, I/O error — hard failure, retry later
                 hard_failures.append(f"{clean_path}: {e}")
-
         # Check: did LLM generate a source summary page?
         source_slug = self.wiki.slugify(Path(filename).stem)
         has_source_summary = any(p.startswith(f"sources/{source_slug}") for p in output_paths)
@@ -516,12 +606,14 @@ class IngestEngine:
         else:
             self.cache.save(filename, source_content, output_paths)
 
-        # Combine parser warnings (H2/H6), blocked paths, and hard failures
+        # Combine parser warnings (H2/H6), blocked paths, hard failures, and language mismatches
         all_warnings = gen_warnings[:]
         for p in blocked_paths:
             all_warnings.append(f"Blocked unsafe path: {p}")
         for hf in hard_failures:
             all_warnings.append(f"Hard failure: {hf}")
+        for lm in language_mismatches:
+            all_warnings.append(lm)
 
         return {
             "status": "ingested",
@@ -532,6 +624,7 @@ class IngestEngine:
             "warnings": all_warnings,
             "blocked_paths": blocked_paths,
             "hard_failures": hard_failures,
+            "language_mismatches": language_mismatches,
         }
 
     def _append_log(self, filename: str, analysis: dict, output_paths: list[str]):

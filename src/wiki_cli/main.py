@@ -86,16 +86,18 @@ def query(question: str, limit: int, output_format: str, llm: bool) -> None:
 
 @cli.command("lint")
 @click.option("--fix", is_flag=True, default=False, help="Auto-fix issues.")
+@click.option("--semantic/--no-semantic", "semantic", default=True,
+              help="Run LLM semantic lint (contradictions, stale content). Default: enabled.")
 @click.option("--severity", "-s", default="info",
               type=click.Choice(["error", "warning", "info"], case_sensitive=False),
               help="Minimum severity to report.")
 @click.option("--format", "output_format", default="text",
               type=click.Choice(["text", "json"], case_sensitive=False),
               help="Output format.")
-def lint(fix: bool, severity: str, output_format: str) -> None:
+def lint(fix: bool, semantic: bool, severity: str, output_format: str) -> None:
     """Lint wiki documents for common issues."""
     from wiki_cli.commands.lint_cmd import lint as _lint
-    _lint(fix=fix, severity=severity, output_format=output_format)
+    _lint(fix=fix, semantic=semantic, severity=severity, output_format=output_format)
 
 
 @cli.command("graph")

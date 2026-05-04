@@ -7,12 +7,13 @@ Rules:
   FM        – frontmatter missing required fields (type, title, created, updated)
   STALE     – 'updated' date is older than 90 days
   XREF      – page has fewer than 2 outbound [[wikilinks]]
+  SEMANTIC  – LLM-detected content issues (contradiction, stale, missing-page, suggestion)
 
 Each issue is a dict with keys:
   severity  – "error" | "warning" | "info"
   rule_id   – one of the codes above
   message   – human-readable description
-  file      – relative path to the offending file
+  file      – relative path to the offending file (or title for semantic issues)
   suggestion – suggested fix (plain text)
 """
 
@@ -33,6 +34,10 @@ SEVERITY: Dict[str, str] = {
     "FM": "error",
     "STALE": "info",
     "XREF": "warning",
+    "SEMANTIC": "warning",
+    "CONTRADICTION": "error",
+    "MISSING_PAGE": "info",
+    "SUGGESTION": "info",
 }
 
 # Required frontmatter fields for every page.
@@ -57,8 +62,14 @@ class LintEngine:
 
     # ── Public API ──────────────────────────────────────────────────────
 
-    def lint(self) -> List[Dict[str, Any]]:
-        """Run all checks and return a list of issue dicts."""
+    def lint(self, semantic: bool = True) -> List[Dict[str, Any]]:
+        """Run all checks and return a list of issue dicts.
+
+        Args:
+            semantic: if True, also run LLM-driven semantic lint (contradictions,
+                      stale content, missing pages). Set to False to skip the
+                      expensive LLM call (e.g., in CI with --check-only).
+        """
         issues: List[Dict[str, Any]] = []
         pages = self._collect_pages()          # slug -> {path, frontmatter, content}
         index_entries = self._index_slugs()     # set of slugs in index.md
@@ -114,14 +125,21 @@ class LintEngine:
                     f"Add a [[{slug}]] link from a related page",
                 ))
 
+        # 7. Semantic lint (LLM-driven — expensive, run last)
+        if semantic:
+            issues.extend(self.run_semantic_lint())
+
         return issues
 
-    def lint_and_fix(self) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def lint_and_fix(self, semantic: bool = True) -> Tuple[List[Dict[str, Any]], List[str]]:
         """Run lint, then apply safe auto-fixes.
 
         Returns (issues, fix_descriptions).
+
+        Args:
+            semantic: passed through to lint(). Set False to skip LLM semantic check.
         """
-        issues = self.lint()
+        issues = self.lint(semantic=semantic)
         fixes: List[str] = []
 
         # Group issues by rule for batch fixes
@@ -228,6 +246,132 @@ class LintEngine:
                 "Add more [[wikilink]] references to related pages",
             )]
         return []
+
+    # ── Semantic Lint (LLM-driven) ───────────────────────────────────────
+
+    SEMANTIC_LINT_PROMPT = """You are a wiki quality analyst. Review the following wiki page summaries and identify issues.
+
+{language_directive}
+
+For each issue, output exactly this format:
+
+---LINT: type | severity | Short title---
+Description of the issue.
+PAGES: page1.md, page2.md
+---END LINT---
+
+Types:
+- contradiction: two or more pages make conflicting claims
+- stale: information that appears outdated or superseded
+- missing-page: an important concept is heavily referenced but has no dedicated page
+- suggestion: a question or source worth adding to the wiki
+
+Severities:
+- warning: should be addressed
+- info: nice to have
+
+Only report genuine issues. Do not invent problems. Output ONLY the ---LINT--- blocks, no other text.
+
+## Wiki Pages
+
+{page_summaries}"""
+
+    LINT_BLOCK_RE = __import__("re").compile(
+        r"---LINT:\s*([^\n|]+?)\s*\|\s*([^\n|]+?)\s*\|\s*([^\n-]+?)\s*---\n([\s\S]*?)---END LINT---"
+    )
+
+    def run_semantic_lint(self) -> List[Dict[str, Any]]:
+        """Run LLM-driven semantic analysis on all wiki pages.
+
+        Builds compact summaries (frontmatter + first 500 chars) of each page,
+        then asks the LLM to identify:
+        - contradictions between pages
+        - stale/outdated information
+        - heavily referenced concepts with no dedicated page
+        - suggestions for improvement
+
+        Reference: nashsu/llm_wiki runSemanticLint() in lint.ts:164-299
+        """
+        from .llm import LLMClient
+        from .output_language import build_language_directive
+
+        pages = self._collect_pages()
+        wiki_files = [p for p in pages.values() if p["path"].name != "log.md"]
+
+        if not wiki_files:
+            return []
+
+        # Build compact summaries (frontmatter + first 500 chars)
+        summaries: List[str] = []
+        for info in wiki_files:
+            raw = info["raw"]
+            slug = info["path"].stem
+            # Get relative path from wiki root
+            try:
+                rel = info["path"].relative_to(self.project_path)
+            except ValueError:
+                rel = info["path"]
+            preview = raw[:500] + ("..." if len(raw) > 500 else "")
+            summaries.append(f"### {rel}\n{preview}")
+
+        # Build language directive from concatenated summaries
+        summary_sample = "\n".join(summaries)[:2000]
+        lang_directive = build_language_directive(summary_sample)
+
+        prompt = self.SEMANTIC_LINT_PROMPT.format(
+            language_directive=lang_directive,
+            page_summaries="\n\n".join(summaries),
+        )
+
+        try:
+            client = LLMClient()
+            raw = client.generate(prompt)
+        except Exception as e:
+            print(f"[Lint] Semantic lint LLM call failed: {e}")
+            return []
+
+        return self._parse_semantic_results(raw)
+
+    def _parse_semantic_results(self, raw: str) -> List[Dict[str, Any]]:
+        """Parse ---LINT: type|severity|title--- blocks from LLM output."""
+        issues: List[Dict[str, Any]] = []
+        matches = self.LINT_BLOCK_RE.finditer(raw)
+
+        for m in matches:
+            raw_type = m.group(1).strip().lower()
+            severity = m.group(2).strip().lower()
+            title = m.group(3).strip()
+            body = m.group(4).strip()
+
+            # Parse PAGES line
+            pages_match = __import__("re").search(r"^PAGES:\s*(.+)$", body, __import__("re").M)
+            affected_pages: Optional[List[str]] = None
+            if pages_match:
+                affected_pages = [p.strip() for p in pages_match.group(1).split(",")]
+
+            # Strip PAGES line from detail
+            detail = __import__("re").sub(r"^PAGES:.*$", "", body, flags=__import__("re").M).strip()
+
+            # Map raw_type to rule_id
+            if raw_type == "contradiction":
+                rule_id = "CONTRADICTION"
+            elif raw_type == "missing-page":
+                rule_id = "MISSING_PAGE"
+            elif raw_type in ("stale", "suggestion"):
+                rule_id = "SEMANTIC"
+            else:
+                rule_id = "SEMANTIC"
+
+            issues.append({
+                "severity": severity if severity in ("warning", "info") else "info",
+                "rule_id": rule_id,
+                "message": f"[{raw_type}] {detail}",
+                "file": affected_pages[0] if affected_pages else title,
+                "suggestion": title,
+                "affected_pages": affected_pages,
+            })
+
+        return issues
 
     # ── Auto-fix helpers ────────────────────────────────────────────────
 

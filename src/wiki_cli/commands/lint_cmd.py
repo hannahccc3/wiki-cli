@@ -153,11 +153,12 @@ def _fix_issues(manager: WikiManager, page_info: dict, issues: list[LintIssue]) 
     return fixes
 
 
-def lint(fix: bool, severity: str, output_format: str) -> None:
+def lint(fix: bool, semantic: bool, severity: str, output_format: str) -> None:
     """Lint wiki documents for common issues.
 
     Checks frontmatter completeness, broken wiki links, content quality,
     and naming conventions. Use --fix to attempt automatic repairs.
+    Use --no-semantic to skip the expensive LLM semantic lint pass.
     """
     manager = WikiManager(".")
     pages = manager.list_pages()
@@ -180,6 +181,24 @@ def lint(fix: bool, severity: str, output_format: str) -> None:
         if fix and filtered:
             n = _fix_issues(manager, page, filtered)
             total_fixes += n
+
+    # ── Semantic lint (LLM-driven, expensive — runs once globally) ────────
+    semantic_issues: list[LintIssue] = []
+    if semantic:
+        from wiki_cli.core.lint import LintEngine
+        engine = LintEngine(manager)
+        for iss in engine.run_semantic_lint():
+            # Convert LintEngine issue dict → LintIssue for unified output
+            semantic_issues.append(LintIssue(
+                file_path=iss["file"],
+                line=0,
+                severity=iss["severity"],
+                code=iss["rule_id"],
+                message=iss["message"],
+            ))
+        # Filter by minimum severity
+        semantic_issues = [i for i in semantic_issues if severity_order.get(i.severity, 0) >= min_severity]
+        all_issues.extend(semantic_issues)
 
     # Output
     if output_format == "json":
