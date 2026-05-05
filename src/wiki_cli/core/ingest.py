@@ -324,10 +324,11 @@ class IngestEngine:
     - Use standard frontmatter format
     """
 
-    def __init__(self, wiki_manager, llm_client):
+    def __init__(self, wiki_manager, llm_client, merge: bool = True):
         self.wiki = wiki_manager
         self.llm = llm_client
         self.cache = IngestCache(wiki_manager.project_path)
+        self.merge = merge
 
     def _read_source(self, source_path: str) -> str:
         """Read source file, handling MinerU nested structure."""
@@ -403,7 +404,7 @@ class IngestEngine:
         return parse_llm_json(raw, "analysis")
 
     def _step2_generate_pages(
-        self, analysis: dict, filename: str, source_content: str
+        self, analysis: dict, filename: str, source_content: str, lang_directive: str = ""
     ) -> list[tuple[str, str]]:
         """Step 2: LLM generates wiki pages from analysis.
 
@@ -420,9 +421,11 @@ class IngestEngine:
             if len(source_content) > 50000
             else source_content
         )
+        # Build language directive from source content (cheap, same logic as Step1)
+        lang_dir = build_language_directive(truncated_source)
 
         prompt = PAGE_GENERATION_PROMPT.format(
-            language_directive=lang_directive,
+            language_directive=lang_dir,
             schema=schema[:4000] if schema else "(no schema defined)",
             purpose=purpose[:2000] if purpose else "(no purpose defined)",
             current_index=index[:3000] if index else "(no index yet)",
@@ -450,7 +453,7 @@ class IngestEngine:
             copied.append(str(dest))
         return copied
 
-    def ingest(self, source_path: str, collection: str | None = None) -> dict:
+    def ingest(self, source_path: str, collection: str | None = None, merge: bool = True) -> dict:
         """Ingest a source file into the wiki.
 
         Ingest behavior:
@@ -465,9 +468,9 @@ class IngestEngine:
         - Pages MUST be written to wiki/entities/, wiki/concepts/, etc.
         """
         with ProjectLock(self.wiki.project_path):
-            return self._ingest_impl(source_path, collection)
+            return self._ingest_impl(source_path, collection, merge)
 
-    def _ingest_impl(self, source_path: str, collection: str | None) -> dict:
+    def _ingest_impl(self, source_path: str, collection: str | None, merge: bool = True) -> dict:
         """Ingest implementation (called inside ProjectLock)."""
         filename = os.path.basename(source_path)
 
@@ -542,7 +545,7 @@ class IngestEngine:
 
             # page-merge: if the page already exists, use LLM to merge old + new.
             # Reference: nashsu/llm_wiki writeFileBlocks + page-merge.ts (lines 829-867).
-            if full_path.exists():
+            if full_path.exists() and self.merge:
                 try:
                     existing_content = full_path.read_text(encoding="utf-8")
                 except OSError:

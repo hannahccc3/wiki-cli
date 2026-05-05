@@ -49,11 +49,12 @@ def init(template: str, name: str | None, project_path: str) -> None:
 @click.argument("file", type=click.Path(exists=True))
 @click.option("--collection", "-c", default=None, help="Collection label.")
 @click.option("--force", "-f", is_flag=True, default=False, help="Force re-ingestion.")
+@click.option("--merge/--no-merge", "merge", default=True, help="Use page-merge when re-ingesting (default: enabled). Disable with --no-merge for faster re-ingest.")
 @click.pass_context
-def ingest(ctx: click.Context, file: str, collection: str | None, force: bool) -> None:
+def ingest(ctx: click.Context, file: str, collection: str | None, force: bool, merge: bool) -> None:
     """Ingest a single document FILE into the wiki."""
     from wiki_cli.commands.ingest import ingest as _ingest
-    _ingest(file=file, collection=collection, force=force, wiki_path=ctx.obj["wiki_path"])
+    _ingest(file=file, collection=collection, force=force, merge=merge, wiki_path=ctx.obj["wiki_path"])
 
 
 @cli.command("ingest-batch")
@@ -62,13 +63,14 @@ def ingest(ctx: click.Context, file: str, collection: str | None, force: bool) -
 @click.option("--md-only", is_flag=True, default=False, help="Only ingest .md files.")
 @click.option("--collection", "-c", default=None, help="Collection label.")
 @click.option("--force", "-f", is_flag=True, default=False, help="Force re-ingestion.")
+@click.option("--merge/--no-merge", "merge", default=True, help="Use page-merge when re-ingesting (default: enabled). Disable with --no-merge for faster re-ingest.")
 @click.pass_context
 def ingest_batch(ctx: click.Context, directory: str, recursive: bool, md_only: bool,
-                 collection: str | None, force: bool) -> None:
+                 collection: str | None, force: bool, merge: bool) -> None:
     """Ingest all documents from DIRECTORY into the wiki."""
     from wiki_cli.commands.ingest import ingest_batch as _ingest_batch
     _ingest_batch(directory=directory, recursive=recursive, md_only=md_only,
-                  collection=collection, force=force, wiki_path=ctx.obj["wiki_path"])
+                  collection=collection, force=force, merge=merge, wiki_path=ctx.obj["wiki_path"])
 
 
 @cli.command("query")

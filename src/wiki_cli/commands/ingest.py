@@ -19,7 +19,7 @@ def _get_engine(wiki_path: str = ".") -> IngestEngine:
     return IngestEngine(wiki, llm)
 
 
-def ingest(file: str, collection: str | None, force: bool, wiki_path: str = ".") -> None:
+def ingest(file: str, collection: str | None, force: bool, merge: bool = True, wiki_path: str = ".") -> None:
     """Ingest a single document FILE into the wiki.
 
     The document is analyzed by the LLM and relevant wiki pages are generated
@@ -35,7 +35,7 @@ def ingest(file: str, collection: str | None, force: bool, wiki_path: str = ".")
         click.echo(f"   Collection: {collection}")
 
     try:
-        result = engine.ingest(file, collection=collection)
+        result = engine.ingest(file, collection=collection, merge=merge)
     except FileNotFoundError as e:
         click.echo(f"❌ {e}", err=True)
         sys.exit(1)
@@ -64,6 +64,7 @@ def ingest_batch(
     md_only: bool,
     collection: str | None,
     force: bool,
+    merge: bool = True,
     wiki_path: str = ".",
 ) -> None:
     """Ingest all documents from DIRECTORY into the wiki.
@@ -112,7 +113,7 @@ def ingest_batch(
             engine.cache.invalidate(fpath.name)
 
         try:
-            result = engine.ingest(str(fpath), collection=collection)
+            result = engine.ingest(str(fpath), collection=collection, merge=merge)
             if result["status"] == "cached":
                 click.echo("⏭ cached")
                 skipped += 1
