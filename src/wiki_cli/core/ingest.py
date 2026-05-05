@@ -23,6 +23,8 @@ from .project_mutex import ProjectLock
 from .sanitize import sanitize_page_content
 from .detect_language import detect_language
 from .output_language import build_language_directive
+from .page_merge import MergePageOptions, merge_page_content
+from .sources_merge import merge_array_fields_into_content, UNION_FIELDS
 
 
 # ── Path safety ───────────────────────────────────────────────────────
@@ -233,6 +235,8 @@ Respond ONLY with valid JSON, no markdown fencing."""
 
 PAGE_GENERATION_PROMPT = """You are a wiki page generator. Based on the analysis below, generate wiki pages for a local knowledge base.
 
+{language_directive}
+
 ## Wiki Context
 
 ### Schema
@@ -418,6 +422,7 @@ class IngestEngine:
         )
 
         prompt = PAGE_GENERATION_PROMPT.format(
+            language_directive=lang_directive,
             schema=schema[:4000] if schema else "(no schema defined)",
             purpose=purpose[:2000] if purpose else "(no purpose defined)",
             current_index=index[:3000] if index else "(no index yet)",
@@ -529,11 +534,57 @@ class IngestEngine:
                 language_mismatches.append(msg)
                 continue
 
-            # Write the page to disk
+            # Write the page to disk — with page-merge so re-ingests combine content
+            # instead of silently overwriting.
             full_path = wiki_root / clean_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
+            new_content = sanitize_page_content(block.content)
+
+            # page-merge: if the page already exists, use LLM to merge old + new.
+            # Reference: nashsu/llm_wiki writeFileBlocks + page-merge.ts (lines 829-867).
+            if full_path.exists():
+                try:
+                    existing_content = full_path.read_text(encoding="utf-8")
+                except OSError:
+                    existing_content = ""
+
+                if existing_content:
+                    # Build the LLM merger function for this file.
+                    def make_merger(path: str, analysis_json: str, lang_dir: str):
+                        source_slug = Path(path).stem
+
+                        def merger(existing: str, incoming: str, source_fn: str) -> str:
+                            merge_prompt = f"""You are a wiki page merger. Two versions of the same wiki page are provided.
+Merge them into a single coherent page. Preserve all valuable information from both versions.
+Keep the frontmatter from the existing version (type, title, created, updated, sources, tags, related).
+
+Output ONLY the merged wiki page content (frontmatter + body), no explanation.
+
+---EXISTING VERSION---
+{existing}
+---END EXISTING---
+
+---INCOMING VERSION---
+{incoming}
+---END INCOMING---"""
+                            # Use the same LLM client
+                            return self.llm.generate(merge_prompt)
+
+                    merged_content = merge_page_content(
+                        new_content=new_content,
+                        existing_content=existing_content,
+                        merger=make_merger(clean_path, "", ""),
+                        opts=MergePageOptions(
+                            source_file_name=filename,
+                            page_path=clean_path,
+                        ),
+                    )
+                    new_content = merged_content
+            else:
+                existing_content = ""
+
             try:
-                full_path.write_text(sanitize_page_content(block.content), encoding="utf-8")
+                full_path.write_text(new_content, encoding="utf-8")
                 output_paths.append(clean_path)
             except OSError as e:
                 # Disk full, permission denied, I/O error — hard failure, retry later
