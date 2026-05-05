@@ -1,7 +1,7 @@
 ---
 type: concept
 title: "Power Law Scaling"
-tags: ["mathematical modeling", "scaling laws", "attack effectiveness", "in-context learning"]
+tags: ["mathematical modeling", "scaling laws", "attack effectiveness", "in-context learning", "scaling", "mathematical model", "ICL", "jailbreaking", "mathematics", "LLM behavior"]
 related: ["many-shot-jailbreaking", "in-context-learning", "alignment-finetuning"]
 sources: ["Anil 等 - Many-shot Jailbreaking.md"]
 created: 2024-01-01
@@ -11,53 +11,47 @@ updated: 2024-01-01
 
 ## Overview
 
-Power law scaling refers to a mathematical relationship where attack effectiveness follows a predictable power law pattern with increasing numbers of demonstrations. The expected negative log-probability of an attack being successful follows:
+Power Law Scaling refers to the mathematical relationship where Many-shot Jailbreaking effectiveness follows predictable power laws as the number of demonstrations increases. This enables forecasting what context length is required for attacks to succeed.
+
+## Mathematical Formulation
+
+The expected negative log-probability of a successful attack follows:
 
 ```
--ℰ[log P(harmful response | n-shot MSJ)] = Cn^(-α) + K
+-E[log P(harmful resp. | n-shot MSJ)] = C × n^(-α) + K
 ```
 
-## Components
+Where:
+- `n` = number of in-context demonstrations (shots)
+- `C` = constant
+- `α` (alpha) = power law exponent (measures speed of in-context learning)
+- `K` = offset term
+
+## Key Properties
+
+### Intercept (K)
+- Measures zero-shot likelihood of successful attack
+- Can be increased through alignment training (SL, RL)
+- Does NOT affect how quickly attack effectiveness grows with more shots
 
 ### Exponent (α)
-- Measures the speed of **[[in-context-learning]]**
-- Larger exponent = faster learning = more effective attack
-- Does NOT decrease with standard **[[alignment-finetuning]]**
+- Measures speed of in-context learning
+- Determines how quickly attack effectiveness grows
+- NOT reduced by standard alignment techniques
+- Critical for long-term defense
 
-### Intercept (K or zero-shot term)
-- Represents zero-shot likelihood of harmful behavior
-- Can be increased through RL and SL training
-- Higher intercept = more shots needed for attack to succeed
+## Implications for Defense
 
-### Constant term (C)
-- Scales the overall effectiveness
-- Affected by prompt formatting changes
+If `K` is increased but `α` remains constant:
+- Attack is only temporarily delayed
+- Sufficient context length will always enable successful attack
+- Effective solutions must either reduce `α` or sufficiently increase `K`
 
-## Implications
+## Connection to ICL
 
-### Why Exponent Matters
+Power laws in MSJ are governed by the same underlying mechanisms as general ICL power laws, suggesting the vulnerability is intrinsic to how LLMs learn from context.
 
-A unit increase in intercept corresponds to an **exponential increase** in shots needed to jailbreak. However:
-- If exponent stays constant, attacks will eventually succeed
-- Composition attacks can decrease intercept, negating RL/SL benefits
+## Related Pages
 
-### Model Size Effects
-
-Larger models tend to have:
-- Larger exponents (faster learning)
-- Greater susceptibility to attacks at all context lengths
-
-## Defense Implications
-
-Effective defenses must either:
-1. Reduce the power law exponent (making in-context learning slower)
-2. Increase the offset term K sufficiently
-3. Constrain context length (impacting model usefulness)
-
-Standard **[[alignment-finetuning]]** only addresses the intercept, not the fundamental vulnerability.
-
-## Related Concepts
-
-- [[many-shot-jailbreaking]] — Attack following power laws
-- [[in-context-learning]] — Mechanism exhibiting power laws
-- [[alignment-finetuning]] — Affects intercept but not exponent
+- [[many-shot-jailbreaking]]
+- [[in-context-learning]]

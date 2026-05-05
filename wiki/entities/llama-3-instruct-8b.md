@@ -2,7 +2,7 @@
 type: entity
 title: "Llama-3-Instruct-8B"
 tags: ["LLM", "Meta", "open-weight", "safety-aligned"]
-related: ["llama-2-chat", "gemma-7b", "gpt-4o", "llama-2-chat-7b", "llama-2-chat-13b", "llama-2-chat-70b", "meta", "jailbreaking", "safety-alignment"]
+related: ["llama-2-chat", "gemma-7b", "gpt-4o", "llama-2-chat-7b", "llama-2-chat-13b", "llama-2-chat-70b", "meta", "jailbreaking", "safety-alignment", "adaptive-attacks"]
 sources: ["Andriushchenko 等 - 2024 - Jailbreaking Leading Safety-Aligned LLMs with Simple Adaptive Attacks.md"]
 created: 2024-01-01
 updated: 2024-01-01
@@ -11,16 +11,25 @@ updated: 2024-01-01
 
 ## Επισκόπηση
 
-Το Llama-3-Instruct-8B είναι ένα μοντέλο LLM από τη Meta, που κυκλοφόρησε τον Απρίλιο του 2024. Έχει σχεδιαστεί με ενισχυμένες δυνατότητες ακολουθίας οδηγιών και βελτιωμένη ασφάλεια.
+Το Llama-3-Instruct-8B είναι ένα μοντέλο 8 δισεκατομμυρίων παραμέτρων που κυκλοφόρησε τον Απρίλιο του 2024 από τη Meta.
 
-## Αποτελέσματα Έρευνας
+## Ευπάθεια σε Επιθέσεις
 
-Παρά τα προηγμένα χαρακτηριστικά ασφαλείας του, η έρευνα κατάφερε να επιτύχει **100% ποσοστό επιτυχίας επίθεσης** χρησιμοποιώντας Prompt + Random Search + Self-Transfer.
+| Μέθοδος | Ποσοστό Επιτυχίας |
+|---------|-------------------|
+| Βασική Προτροπή | 0% |
+| Προτροπή + RS | 100% |
+| Προτροπή + RS + Self-Transfer | 100% |
+
+## Σημαντική Παρατήρηση
+
+Το Llama-3-Instruct-8B ήταν ευάλωτο ακόμη και χωρίς self-transfer, σε αντίθεση με άλλα μοντέλα Llama.
 
 ## Σχετικές Σελίδες
 
-- [[meta]]
-- [[llama-2-chat]]
+- [[llama-2-chat-7b]]
+- [[gemma-7b]]
 - [[jailbreaking]]
 - [[random-search]]
 - [[self-transfer]]
+- [[meta]]

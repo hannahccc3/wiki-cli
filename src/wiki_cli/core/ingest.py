@@ -553,9 +553,7 @@ class IngestEngine:
 
                 if existing_content:
                     # Build the LLM merger function for this file.
-                    def make_merger(path: str, analysis_json: str, lang_dir: str):
-                        source_slug = Path(path).stem
-
+                    def make_merger(path: str):
                         def merger(existing: str, incoming: str, source_fn: str) -> str:
                             merge_prompt = f"""You are a wiki page merger. Two versions of the same wiki page are provided.
 Merge them into a single coherent page. Preserve all valuable information from both versions.
@@ -572,11 +570,12 @@ Output ONLY the merged wiki page content (frontmatter + body), no explanation.
 ---END INCOMING---"""
                             # Use the same LLM client
                             return self.llm.generate(merge_prompt)
+                        return merger
 
                     merged_content = merge_page_content(
                         new_content=new_content,
                         existing_content=existing_content,
-                        merger=make_merger(clean_path, "", ""),
+                        merger=make_merger(clean_path),
                         opts=MergePageOptions(
                             source_file_name=filename,
                             page_path=clean_path,

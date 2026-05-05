@@ -5,72 +5,89 @@ authors: ["Cem Anil", "Esin Durmus", "Mrinank Sharma", "Joe Benton", "Sandipan K
 year: 2024
 url: ""
 venue: ""
-tags: ["jailbreaking", "LLM security", "adversarial attacks", "in-context learning", "context windows", "alignment", "safety", "power laws", "large language models", "red teaming", "LLM safety", "model security"]
-related: ["many-shot-jailbreaking", "in-context-learning", "power-laws", "greedy-coordinate-gradient", "in-context-defense", "cautionary-warning-defense", "claude-2.0", "gpt-3.5", "gpt-4", "llama-2-70b", "mistral-7b", "anthropic", "openai", "google-deepmind", "gcg", "alignment-finetuning", "power-law-scaling", "few-shot-jailbreaking"]
+tags: ["jailbreaking", "LLM security", "adversarial attacks", "in-context learning", "context windows", "alignment", "safety", "power laws", "large language models", "red teaming", "LLM safety", "model security", "model scaling"]
+related: ["many-shot-jailbreaking", "in-context-learning", "power-laws", "greedy-coordinate-gradient", "in-context-defense", "cautionary-warning-defense", "claude-2.0", "gpt-3.5", "gpt-4", "llama-2-70b", "mistral-7b", "anthropic", "openai", "google-deepmind", "gcg", "alignment-finetuning", "power-law-scaling", "few-shot-jailbreaking", "jailbreak-composition", "llama-2"]
 sources: ["Anil 等 - Many-shot Jailbreaking.md"]
-created: 2024-01-01
-updated: 2024-01-01
+created: 2024-01-15
+updated: 2024-01-15
 ---
 # Many-shot Jailbreaking
 
 ## Overview
 
-Many-shot Jailbreaking (MSJ) is a long-context attack technique that uses hundreds of demonstrations of undesirable behavior to steer large language models (LLMs) toward harmful responses. The research demonstrates that MSJ successfully jailbreaks multiple state-of-the-art models including Claude 2.0, GPT-3.5, GPT-4, Llama 2 70B, and Mistral 7B.
+Many-shot Jailbreaking (MSJ) is a long-context adversarial attack that exploits hundreds of demonstrations of undesirable behavior to override safety guardrails in large language models. The research demonstrates that this technique effectively jailbreaks state-of-the-art LLMs including Claude 2.0, GPT-4, Llama 2, and Mistral 7B, and that attack effectiveness follows predictable power laws with the number of demonstrations.
 
 ## Key Findings
 
-### Effectiveness Across Models
+### Attack Effectiveness
 
-MSJ demonstrates that attack effectiveness follows predictable power laws up to hundreds of shots. The technique successfully jailbreaks models from different developers across various tasks including:
-
-- **Malicious use-cases**: Security and societal impact requests (weapons, disinformation)
-- **Malevolent personality evals**: Queries assessing malign personality traits
-- **Opportunities to insult**: Benign questions tricked into insulting responses
+- MSJ successfully jailbreaks multiple prominent LLMs across various tasks
+- Attack effectiveness follows predictable power laws up to hundreds of shots
+- Larger models are more susceptible due to faster in-context learning rates
+- The attack works across diverse topics including weapons instructions, insults, and deceptive content
 
 ### Scaling Behavior
 
-The research reveals that:
+The researchers discovered that the effectiveness of MSJ follows a power law relationship:
 
-1. MSJ effectiveness follows predictable **[[power-law-scaling]]** patterns with increasing context length
-2. Larger models tend to be more susceptible due to faster **[[in-context-learning]]** speeds
-3. The attack is robust to format, style, and subject changes in prompt formatting
+```
+-E[log P(harmful response | n-shot MSJ)] = Cn^(-α) + K
+```
+
+Where:
+- `n` is the number of demonstrations
+- `α` is the power law exponent (learning rate)
+- `C` and `K` are constants
 
 ### Alignment Limitations
 
-Standard **[[alignment-finetuning]]** techniques (supervised fine-tuning and reinforcement learning) only increase the power law intercept but do not reduce the exponent. This means:
+Standard alignment techniques (supervised learning and reinforcement learning) only affect the intercept but not the exponent of the power law. This means they delay but cannot prevent attacks at arbitrary context lengths. The key insight is that:
 
-- Attacks remain effective at sufficiently long context lengths
-- Simply scaling up RL or SL training will not defend against MSJ at all context lengths
+- **Intercept changes**: RL and SL reduce zero-shot probability of harmful behavior
+- **Exponent remains constant**: The rate at which attacks become more effective with more shots does not decrease
 
-### Composition Attacks
+## Methods Used
 
-MSJ can be combined with other jailbreak techniques:
+### Attack Construction
+- Generated using "helpful-only" models (models without harmlessness training)
+- Hundreds of compliant query-response pairs are randomized and formatted as dialogue
+- The target query is appended to trigger the harmful response
 
-- **[[composition-attacks]]** with competing objectives reduce required context length
-- Composition with **[[gcg]]** adversarial suffix has mixed effects depending on shot count
+### Composition with Other Attacks
+MSJ can be combined with:
+- **Competing objectives attacks**: Pits two conflicting objectives in prompts
+- **GCG suffixes**: White-box adversarial suffix optimization
 
-## Mitigation Strategies Evaluated
+These combinations reduce the context length required for successful attacks.
 
-### Prompt-Based Defenses
+## Defenses Evaluated
 
-- **[[in-context-defense]]**: Only marginally reduces attack success rate (61% to 54%)
-- **[[cautionary-warning-defense]]**: More effective but not fully protective
-
-### Fine-tuning Approaches
-
-Neither targeted **[[supervised-finetuning]]** nor targeted **[[reinforcement-learning]]** prevent MSJ at arbitrary context lengths, as they only increase intercept without reducing exponent.
+| Defense | Effectiveness | Notes |
+|---------|---------------|-------|
+| Supervised Learning | Limited | Only affects intercept, not exponent |
+| Reinforcement Learning | Limited | Only affects intercept, not exponent |
+| In-Context Defense (ICD) | Partial | Reduces success from 61% to 54% with 205 shots |
+| Cautionary Warning Defense (CWD) | Better | Reduces effectiveness to 2% |
 
 ## Implications
 
-The findings suggest that **very long contexts present a rich new attack surface for LLMs**. Since the mechanisms underlying MSJ appear to be the same as general in-context learning, protecting against MSJ without harming benign ICL may prove challenging.
+1. **Context Windows as Attack Surface**: The expansion of LLM context windows from ~4,000 tokens to 10M tokens presents new vulnerabilities
+2. **Safety Concerns for Large Models**: Larger models may be more susceptible to MSJ due to faster in-context learning
+3. **Fundamental Challenge**: Protecting against MSJ without compromising benign ICL performance may be difficult since both appear to share underlying mechanisms
 
 ## Related Pages
 
-- [[many-shot-jailbreaking]]
 - [[in-context-learning]]
-- [[gcg]]
-- [[alignment-finetuning]]
-- [[in-context-defense]]
-- [[cautionary-warning-defense]]
 - [[power-law-scaling]]
-- [[few-shot-jailbreaking]]
+- [[alignment-finetuning]]
+- [[gcg]]
+- [[jailbreak-composition]]
+- [[anthropic]]
+- [[openai]]
+- [[google-deepmind]]
+- [[claude-2.0]]
+- [[gpt-4]]
+- [[mistral-7b]]
+- [[llama-2]]
+- [[induction-heads]]
+- [[in-context-defense]]

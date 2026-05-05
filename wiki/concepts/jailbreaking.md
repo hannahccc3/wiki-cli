@@ -1,54 +1,78 @@
 ---
 type: concept
 title: "Jailbreaking"
-tags: ["Ασφάλεια LLM", "Αντιπαραθετικές Επιθέσεις", "Ευθυγράμμιση Ασφαλείας", "jailbreaking", "LLM security", "adversarial attacks", "LLM safety", "security", "harmful content", "adversarial attack", "safety bypass", "AI_security", "LLM_security", "Model_alignment", "Adversarial_ML"]
-related: ["safety-alignment", "adaptive-attacks", "random-search", "transfer-attacks", "prefilling-attack", "llm-security", "self-transfer", "many-shot-jailbreaking", "few-shot-jailbreaking", "adversarial-suffix", "composition-attack", "black-box-attack", "rl-jack", "white-box-attack", "in-context-learning", "genetic-algorithms", "bit-flip-attack", "prlsonbreak-attack", "rowhammer", "alignment-bypass"]
-sources: ["Andriushchenko 等 - 2024 - Jailbreaking Leading Safety-Aligned LLMs with Simple Adaptive Attacks.md", "Anil 等 - Many-shot Jailbreaking.md", "Chen 等 - 2024 - RL-JACK Reinforcement Learning-powered Black-box Jailbreaking Attack against LLMs.md", "Coalson 等 - 2025 - PrisonBreak Jailbreaking Large Language Models with at Most Twenty-Five Targeted Bit-flips.md"]
-created: 2025-01-15
-updated: 2025-01-15
+tags: ["Ασφάλεια LLM", "Αντιπαραθετικές Επιθέσεις", "Ευθυγράμμιση Ασφαλείας", "jailbreaking", "LLM security", "adversarial attacks", "LLM safety", "security", "harmful content", "adversarial attack", "safety bypass", "AI_security", "LLM_security", "Model_alignment", "Adversarial_ML", "LLM-Sicherheit", "Adversarial-Angriffe", "KI-Sicherheit"]
+related: ["safety-alignment", "adaptive-attacks", "random-search", "transfer-attacks", "prefilling-attack", "llm-security", "self-transfer", "many-shot-jailbreaking", "few-shot-jailbreaking", "adversarial-suffix", "composition-attack", "black-box-attack", "rl-jack", "white-box-attack", "in-context-learning", "genetic-algorithms", "bit-flip-attack", "prlsonbreak-attack", "rowhammer", "alignment-bypass", "jailbreakbench", "harmbench", "gcg", "pair", "smoothllm", "red-teaming", "adaptive-angriffe", "schwarzkasten-angriffe", "weisskasten-angriffe", "adversarielle-suffixe", "angriffserfolgsrate"]
+sources: ["Andriushchenko 等 - 2024 - Jailbreaking Leading Safety-Aligned LLMs with Simple Adaptive Attacks.md", "Anil 等 - Many-shot Jailbreaking.md", "Chen 等 - 2024 - RL-JACK Reinforcement Learning-powered Black-box Jailbreaking Attack against LLMs.md", "Coalson 等 - 2025 - PrisonBreak Jailbreaking Large Language Models with at Most Twenty-Five Targeted Bit-flips.md", "Chao 等 - 2024 - JailbreakBench An Open Robustness Benchmark for Jailbreaking Large Language Models.md"]
+created: 2024-01-01
+updated: 2024-01-01
 ---
 # Jailbreaking
 
-## Ορισμός
+## Definition
 
-Το **Jailbreaking** είναι μια μέθοδος αφαίρεσης της ασφαλειακής ευθυγράμμισης από μοντέλα γλώσσας για αποφυγή άρνησης επιβλαβών αιτημάτων. Πρόκειται για τεχνική που επιτρέπει σε έναν αντίπαλο να υποχρεώσει ένα μοντέλο να παράγει περιεχόμενο που κανονικά θα αρνούνταν να δημιουργήσει.
+Jailbreaking bezeichnet Angriffe, die Large Language Models (LLMs) dazu bringen, schädliche, unethische oder anstößige Inhalte zu generieren, indem sie adversarielle Eingabeaufforderungen verwenden.
 
-## Τύποι Jailbreaking
+## Formale Definition
 
-### 1. Prompt-based Jailbreaking
-- Τροποποίηση των εισόδων (prompts) για παράκαμψη της ευθυγράμμισης
-- Παραδείγματα: GCG, AutoDAN, PAIR
-- Απαιτεί εξειδικευμένα προθέματα ή επιθέματα
+Das Ziel eines Jailbreaking-Algorithmus kann formalisiert werden als:
 
-### 2. Parameter-based Jailbreaking
-- Τροποποίηση των παραμέτρων του μοντέλου
-- Παραδείγματα: ORTHO, PRISONBREAK
-- Μόνιμη αφαίρεση της ευθυγράμμισης στη μνήμη
+> Finde P ∈ T* unter der Bedingung, dass JUDGE(LLM(P), G) = True
 
-### 3. Bit-flip Jailbreaking
-- Αναστροφή ελάχιστων bits στις παραμέτρους
-- **PRISONBREAK**: Μόλις 5-25 bit-flips για 80-98% ASR
-- Δεν απαιτεί τροποποίηση εισόδων
+wobei:
+- P = Eingabe-Prompt
+- T* = Menge aller Token-Sequenzen beliebiger Länge
+- JUDGE = Bewertungsfunktion
+- G = schädliches Ziel
+- LLM = Zielmodell
 
-## Σύγκριση Μεθόδων
+## Arten von Jailbreaking-Angriffen
 
-| Μέθοδος | ASR | Τροποποιήσεις | Μόνιμη |
-|---------|-----|---------------|--------|
-| PRISONBREAK | 80-98% | 5-25 bits | Ναι |
-| ORTHO | 80-94% | 0.7-23.4B παράμετροι | Ναι |
-| GCG | 22-73% | Prompt-based | Όχι |
+### Schwarzkasten-Angriffe
+Der Angreifer hat keinen Zugang zum Modell (keine Gradienten, keine internen Informationen).
 
-## Μηχανισμοί Άμυνας
+### Weißkasten-Angriffe
+Der Angreifer hat vollen Zugang zum Modell, einschließlich Gradienten und Modellgewichten.
 
-Τα μοντέλα χρησιμοποιούν διάφορες τεχνικές ευθυγράμμισης:
-- **SFT** (Supervised Fine-Tuning)
-- **RLHF** (Reinforcement Learning from Human Feedback)
-- **DPO** (Direct Preference Optimization)
+### Adaptive Angriffe
+Angriffe, die speziell auf eine bestimmte Verteidigung zugeschnitten sind.
 
-## Σχετικές Σελίδες
+## Methoden
 
-- [[bit-flip-attack]] - Επίθεση αναστροφής bit
-- [[prlsonbreak-attack]] - Η επίθεση PRISONBREAK
-- [[rowhammer]] - Rowhammer ως τεχνική έγχυσης σφαλμάτων
-- [[safety-alignment]] - Ασφαλειακή ευθυγράμμιση
-- [[alignment-bypass]] - Παράκαμψη ευθυγράμμισης
+1. **Manuell erstellte Prompts** – Handwerklich verfeinerte Jailbreak-Eingaben
+2. **GCG (Greedy Coordinate Gradient)** – First-Order diskrete Optimierung
+3. **PAIR (Prompt Automatic Iterative Refinement)** – LLM-gestützte Angriffe
+4. **Genetische Algorithmen** – Evolutionäre Optimierung
+5. **Zufallssuche mit Selbsttransfer** – Pre-computierte Initialisierungen
+
+## Bekannte Angriffe
+
+- [[gcg]] – Greedy Coordinate Gradient
+- [[pair]] – Prompt Automatic Iterative Refinement
+- [[deepwordbug]] – DeepWordBug
+- [[bert-attack]] – BERT-Attack
+- [[autodan]] – AutoDAN
+
+## Verteidigungen
+
+- [[smoothllm]] – Semantische Glättung
+- [[perplexity-filter]] – Perplexitäts-basierte Filter
+- [[erase-and-check]] – Erase-and-Check Methode
+- [[llama-guard]] – Llama Guard Sicherheitsmodell
+
+## Relevanz
+
+Jailbreaking ist eine erhebliche Bedrohung für die [[llm-sicherheit]], insbesondere wenn LLMs in sicherheitskritischen Bereichen eingesetzt werden. Das [[jailbreakbench]] Benchmark ermöglicht die standardisierte Evaluierung dieser Angriffe und Verteidigungen.
+
+## Metriken
+
+Die **[[angriffserfolgsrate]]** (ASR) misst den Prozentsatz erfolgreicher Jailbreak-Angriffe.
+
+## Verwandte Seiten
+
+- [[jailbreakbench]] – JailbreakBench Benchmark
+- [[harmbench]] – HarmBench Benchmark
+- [[advbench]] – AdvBench Datensatz
+- [[red-teaming]] – Red-Teaming Konzept
+- [[jailbreak-judge]] – Jailbreak-Richter
+- [[adaptive-angriffe]] – Adaptive Angriffe

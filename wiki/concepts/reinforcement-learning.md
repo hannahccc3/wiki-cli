@@ -1,8 +1,8 @@
 ---
 type: concept
 title: "Reinforcement Learning (RL)"
-tags: ["training", "alignment", "RLHF", "safety", "reward", "LLM training", "machine learning"]
-related: ["safety-alignment", "many-shot-jailbreaking", "supervised-fine-tuning", "alignment-finetuning", "rlhf", "supervised-finetuning", "power-law-scaling"]
+tags: ["training", "alignment", "RLHF", "safety", "reward", "LLM training", "machine learning", "LLM"]
+related: ["safety-alignment", "many-shot-jailbreaking", "supervised-fine-tuning", "alignment-finetuning", "rlhf", "supervised-finetuning", "power-law-scaling", "alignment-pipeline"]
 sources: ["Anil 等 - Many-shot Jailbreaking.md"]
 created: 2024-01-01
 updated: 2024-01-01
@@ -11,45 +11,40 @@ updated: 2024-01-01
 
 ## Overview
 
-Reinforcement Learning (RL) is a training technique used in **[[alignment-finetuning]]** where models are trained using reward models to optimize for human preferences, often through **[[rlhf]]** (Reinforcement Learning from Human Feedback).
+Reinforcement Learning (RL), particularly RLHF (Reinforcement Learning from Human Feedback), is a key alignment technique used to train AI assistants to be helpful, harmless, and honest.
 
-## Effect on Power Laws
+## Effectiveness Against MSJ
 
-Like **[[supervised-finetuning]]**, RL affects the **intercept** of **[[power-law-scaling]]** but NOT the exponent:
+The Many-shot Jailbreaking research evaluated RL as a mitigation:
 
-- **Intercept increases**: Model less susceptible to zero-shot attacks
-- **Exponent unchanged**: In-context learning speed unaffected
-- **Result**: Temporary delay, not prevention of attacks
+### Effects on Power Laws
 
-## Targeted RL Against MSJ
+- **Intercept**: RL increases the power law intercept
+- **Exponent**: RL does NOT reduce the power law exponent
+- **Result**: Zero-shot vulnerability decreases, but attacks remain effective with sufficient context
 
-Researchers explored RL training specifically on MSJ prompts:
+### Key Finding
 
-### Method
-1. Replace standard harmlessness prompts with MSJ prompts (up to 10 shots)
-2. Penalize harmful responses using preference model
-3. Train model to produce benign responses to MSJ
+> While the zero-shot likelihood of undesirable behavior decreases, additional shots continue to increase the probability of eliciting undesirable behavior.
 
-### Findings
-- Intercept on harmful requests increases
-- Exponent remains unaffected
-- Zero-shot susceptibility decreases
+### Targeted RL Experiments
 
-## Unique RL Observations
+Training with MSJ prompts in the preference data:
+- Similar results to targeted SL
+- Increased intercept on harmful requests
+- Exponent remained unaffected
+- Model less susceptible to zero-shot attacks but vulnerable to in-context attacks
 
-Unlike SL:
-- Intercept on responses to benign requests also increases during RL
-- Model may go off-distribution with respect to evaluation data
-- Temperature shifts occur during training
+### Comparison with SL
 
-## Research Conclusion
+Both SL and RL primarily affect the intercept, not the exponent. This suggests the in-context learning mechanism that enables MSJ is robust to standard alignment techniques.
 
-> "None of the finetuning-based interventions we've studied (SL or RL) provided long-term relief from MSJ, as these methods are unable to substantially eliminate the in-context scaling of MSJ."
+## Implications
 
-## Related Concepts
+Scaling up RL training alone will not prevent MSJ at all context lengths. The vulnerability is intrinsic to in-context learning.
 
-- [[alignment-finetuning]] — Parent concept
-- [[supervised-finetuning]] — Complementary technique
-- [[rlhf]] — Specific RL variant used
-- [[many-shot-jailbreaking]] — Attack being defended against
-- [[power-law-scaling]] — Relationship affected by RL
+## Related Pages
+
+- [[many-shot-jailbreaking]]
+- [[alignment-pipeline]]
+- [[supervised-fine-tuning]]

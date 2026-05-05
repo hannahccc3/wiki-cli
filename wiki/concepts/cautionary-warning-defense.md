@@ -11,40 +11,33 @@ updated: 2024-01-01
 
 ## Overview
 
-Cautionary Warning Defense (CWD) is a prompt-based mitigation that uses natural language warnings prepended and appended to prompts to caution the assistant model against being jailbroken.
+Cautionary Warning Defense (CWD) is a prompt-based mitigation strategy that prepends and appends natural language warning texts to caution the assistant model against being jailbroken.
 
 ## Mechanism
 
 CWD works by:
-1. Prepending natural language warnings to prompts
-2. Appending additional warnings after the prompt
-3. Using cautionary language to deter harmful compliance
+1. Adding warning text at the beginning of the prompt
+2. Adding reinforcing text at the end of the prompt
+3. Aiming to make the model more vigilant against manipulation attempts
 
-## Effectiveness
+## Effectiveness Against MSJ
 
-Research shows CWD is **more effective** than **[[in-context-defense]]**:
+The research evaluated CWD against Many-shot Jailbreaking:
 
-| Metric | Without Defense | CWD |
-|--------|-----------------|-----|
-| Attack success rate (deception) | 61% | 2% |
-| Reduction | - | ~59% |
+### Results
 
-### Comparison
-
-| Defense | Effectiveness | Mechanism |
-|---------|---------------|-----------|
-| ICD | ~7% reduction | Refusal demonstrations |
-| CWD | ~59% reduction | Warning messages |
+- **Attack success rate**: Lowered to approximately 2%
+- **Effectiveness**: Significantly more effective than [[in-context-defense]] (ICD)
+- **Comparison**: ICD reduced success from 61% to 54%; CWD reduced to 2%
 
 ## Limitations
 
-Despite higher effectiveness, CWD:
-1. Does not fully prevent MSJ at arbitrary context lengths
-2. May impact model usefulness if warnings are too aggressive
-3. Requires careful tuning of warning language
+While more effective than ICD, CWD still has limitations:
+- May impact model helpfulness on legitimate tasks
+- Requires careful testing of safety-capability trade-offs
+- May not be foolproof against all attack variations
 
-## Related Concepts
+## Related Pages
 
-- [[many-shot-jailbreaking]] — Attack being defended against
-- [[in-context-defense]] — Less effective alternative
-- [[alignment-finetuning]] — Does not replace prompt-based defenses
+- [[many-shot-jailbreaking]]
+- [[in-context-defense]]

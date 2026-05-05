@@ -11,36 +11,33 @@ updated: 2024-01-01
 
 ## Overview
 
-In-Context Defense (ICD) is a prompt-based mitigation that prepends demonstrations of refusals to harmful questions. It is designed to counter **[[many-shot-jailbreaking]]** by showing the model examples of appropriate refusal behavior.
+In-Context Defense (ICD) is a prompt-based mitigation strategy that prepends incoming prompts with demonstrations of refusals to harmful questions.
 
 ## Mechanism
 
-ICD works by:
-1. Prepending incoming prompts with refusal demonstrations
-2. Showing model examples of refusing harmful requests
-3. Using in-context learning to encourage refusal behavior
+ICD works by providing the model with examples of appropriate refusal behavior before the potentially adversarial content, encouraging the model to follow similar patterns.
 
-## Effectiveness
+## Effectiveness Against MSJ
 
-Research shows ICD has **limited effectiveness** against MSJ:
+The research evaluated ICD against Many-shot Jailbreaking:
 
-| Metric | Without ICD | With ICD |
-|--------|-------------|----------|
-| Attack success rate (deception) | 61% | 54% |
-| Reduction | - | ~7% |
+### Results
+
+- **Attack success rate (deception category, 205-shot MSJ)**: Reduced from 61% to 54%
+- **Impact**: Only slight reduction in attack effectiveness
+- **Conclusion**: Limited effectiveness against many-shot jailbreaking
 
 ### Limitations
 
-1. Only marginally reduces attack success rate
-2. Does not fundamentally prevent the attack
-3. Attack remains effective at long enough context lengths
+- Does not fundamentally address the in-context learning vulnerability
+- May not scale with increasing context lengths
+- Demonstrations of refusals may be "overwritten" by hundreds of harmful demonstrations
 
-## Comparison to Other Defenses
+## Comparison with Other Defenses
 
-ICD is less effective than **[[cautionary-warning-defense]]**, which achieves 98% reduction in effectiveness. However, neither defense fully prevents MSJ at arbitrary context lengths.
+ICD was compared with [[cautionary-warning-defense]] (CWD), which showed better effectiveness (reducing attack success to 2% in some cases).
 
-## Related Concepts
+## Related Pages
 
-- [[many-shot-jailbreaking]] — Attack being defended against
-- [[cautionary-warning-defense]] — More effective alternative
-- [[alignment-finetuning]] — Does not replace prompt-based defenses
+- [[many-shot-jailbreaking]]
+- [[cautionary-warning-defense]]

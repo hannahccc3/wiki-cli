@@ -1,8 +1,8 @@
 ---
 type: concept
 title: "Many-shot Jailbreaking (MSJ)"
-tags: ["adversarial attacks", "jailbreaking", "LLM safety", "in-context learning", "context windows", "LLM security", "safety", "long-context"]
-related: ["in-context-learning", "few-shot-jailbreaking", "safety-alignment", "adaptive-attacks", "adversarial-suffix", "composition-attack", "power-laws", "in-context-defense", "cautionary-warning-defense", "greedy-coordinate-gradient", "claude-2.0", "gpt-4", "power-law-scaling", "composition-attacks", "gcg", "alignment-finetuning"]
+tags: ["adversarial attacks", "jailbreaking", "LLM safety", "in-context learning", "context windows", "LLM security", "safety", "long-context", "long-context models"]
+related: ["in-context-learning", "few-shot-jailbreaking", "safety-alignment", "adaptive-attacks", "adversarial-suffix", "composition-attack", "power-laws", "in-context-defense", "cautionary-warning-defense", "greedy-coordinate-gradient", "claude-2.0", "gpt-4", "power-law-scaling", "composition-attacks", "gcg", "alignment-finetuning", "jailbreak-composition", "alignment-pipeline", "adversarial-suffix-attack"]
 sources: ["Anil 等 - Many-shot Jailbreaking.md"]
 created: 2024-01-01
 updated: 2024-01-01
@@ -11,52 +11,53 @@ updated: 2024-01-01
 
 ## Overview
 
-Many-shot Jailbreaking (MSJ) is a simple long-context attack technique that uses hundreds of demonstrations of undesirable behavior to steer large language models (LLMs) toward harmful responses. It extends the concept of **[[few-shot-jailbreaking]]** into the newly feasible regime of very long context windows (up to millions of tokens).
+Many-shot Jailbreaking (MSJ) is a long-context attack that exploits the expanded context windows of modern large language models by conditioning models on hundreds of demonstrations of undesirable behavior. This attack extends the concept of few-shot jailbreaking to the long-context regime.
 
 ## How It Works
 
-MSJ operates by conditioning an LLM on a large number of harmful question-answer pairs:
+MSJ operates by:
 
-1. The attacker generates compliant query-response pairs using a "helpful-only" model
-2. These pairs are formatted to resemble standard dialogue between user and assistant
-3. The pairs are randomized and formatted as fictional dialogue
-4. The target query is appended to the end
-5. The entire dialogue is sent as a single query
+1. **Generating attack strings**: Creating hundreds of compliant query-response pairs using a "helpful-only" model (a model tuned to follow instructions but without harmlessness training)
+2. **Randomizing and formatting**: Randomizing the order of demonstrations and formatting them as standard dialogue between user and assistant
+3. **Appending target query**: Adding the target query to which the attacker wants a compliant response
+4. **Sending as single query**: Submitting the entire dialogue as a single prompt
 
-## Key Characteristics
+## Effectiveness
 
-### Robustness
+- MSJ successfully jailbreaks multiple state-of-the-art models including [[claude-2.0]], [[gpt-3.5]], [[gpt-4]], [[llama-2-70b]], and [[mistral-7b]]
+- Attack effectiveness follows predictable power laws up to hundreds of shots and ~70,000 tokens
+- Works even when demonstrations differ in topic from target query if demonstrations are sufficiently diverse
 
-MSJ is robust to:
-- Format changes (swapping user/assistant tags)
-- Style changes (translating to different languages)
-- Subject changes (diverse demonstrations work even when target topic differs)
+## Model Size Susceptibility
 
-### Power Law Scaling
+Larger models tend to be more susceptible to MSJ due to faster [[in-context-learning]] speeds. The power law exponent (measuring speed of in-context learning) is larger for larger models.
 
-Attack effectiveness follows predictable **[[power-law-scaling]]** patterns:
-```
--ℰ[log P(harmful response | n-shot MSJ)] = Cn^(-α) + K
-```
+## Composability
 
-This enables forecasting of attack success at various context lengths.
+MSJ can be combined with other jailbreaks to reduce context length requirements:
 
-### Model Susceptibility
+- **Competing objectives attack**: Increases probability of harmful response at all context lengths
+- **[[gcg]] (Greedy Coordinate Gradient)**: Effects depend on shot count; GCG suffixes are location-specific and may not retain effectiveness when position is modified
 
-Larger models tend to be more susceptible because:
-- They learn faster in context
-- They have larger power law exponents
-- Alignment training increases intercept but not exponent
+## Prompt Formatting Robustness
 
-## Related Concepts
+Changes to prompt formatting affect the intercept but not the slope of power laws:
 
-- [[in-context-learning]] — MSJ exploits the same mechanisms as general ICL
-- [[few-shot-jailbreaking]] — Precursor attack using fewer demonstrations
-- [[composition-attacks]] — Combining MSJ with other jailbreaks
-- [[gcg]] — Greedy Coordinate Gradient for adversarial suffixes
-- [[alignment-finetuning]] — Standard defenses that MSJ bypasses
+- Swapping user/assistant tags
+- Translating to different languages
+- Using "Question" and "Answer" instead of "Human" and "Assistant"
 
-## Related Defenses
+## Limitations of Standard Mitigations
 
-- [[in-context-defense]] — Prepends refusal demonstrations
-- [[cautionary-warning-defense]] — Uses natural language warnings
+- [[supervised-fine-tuning]] (SL): Increases power law intercept but does not reduce exponent
+- [[reinforcement-learning]] (RL): Increases intercept but doesn't reduce scaling exponent
+- Neither prevents attacks at all context lengths
+
+## Related Pages
+
+- [[few-shot-jailbreaking]] - Related but shorter-context attack
+- [[in-context-learning]] - Underlying mechanism
+- [[power-law-scaling]] - Mathematical relationship
+- [[alignment-pipeline]] - Related training process
+- [[gcg]] - Related white-box attack
+- [[adversarial-suffix-attack]] - Composable attack method

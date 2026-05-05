@@ -1,8 +1,8 @@
 ---
 type: entity
 title: "Nicolas Flammarion"
-tags: ["researcher", "author", "EPFL", "adversarial ML"]
-related: ["maksym-andriushchenko", "francesco-croce", "epfl", "jailbreaking"]
+tags: ["researcher", "author", "EPFL", "adversarial ML", "adversarial-ml"]
+related: ["maksym-andriushchenko", "francesco-croce", "epfl", "jailbreaking", "adaptive-attacks"]
 sources: ["Andriushchenko 等 - 2024 - Jailbreaking Leading Safety-Aligned LLMs with Simple Adaptive Attacks.md"]
 created: 2024-01-01
 updated: 2024-01-01
@@ -11,16 +11,16 @@ updated: 2024-01-01
 
 ## Επισκόπηση
 
-Ο Nicolas Flammarion είναι ερευνητής στο EPFL και συν-συγγραφέας της εργασίας για adaptive attacks σε LLM.
+Ο Nicolas Flammarion είναι ερευνητής στο EPFL και συν-συγγραφέας της εργασίας για απλές προσαρμοστικές επιθέσεις σε LLM.
 
-## Συμβολή
+## Συνεισφορά
 
-Ο Flammarion συνέβαλε στην ανάπτυξη μεθόδων τυχαίας αναζήτησης για εύρεση adversarial suffixes σε μοντέλα γλωσσικής κατανόησης.
+Μαζί με τους Andriushchenko και Croce, καταδεικνύει ότι τα κορυφαία LLM με ευθυγράμμιση ασφαλείας είναι ευάλωτα σε απλές προσαρμοστικές επιθέσεις.
 
 ## Σχετικές Σελίδες
 
 - [[maksym-andriushchenko]]
 - [[francesco-croce]]
 - [[epfl]]
-- [[jailbreaking]]
 - [[adaptive-attacks]]
+- [[jailbreaking]]

@@ -1,8 +1,8 @@
 ---
 type: entity
 title: "Llama-2-Chat-13B"
-tags: [LLM, Meta, open-weight]
-related: [llama-2-chat-7b, llama-2-chat-70b, llama-3-instruct-8b]
+tags: ["LLM", "Meta", "open-weight", "safety-aligned"]
+related: ["llama-2-chat-7b", "llama-2-chat-70b", "llama-3-instruct-8b", "jailbreaking", "adaptive-attacks"]
 sources: ["Andriushchenko 等 - 2024 - Jailbreaking Leading Safety-Aligned LLMs with Simple Adaptive Attacks.md"]
 created: 2024-01-01
 updated: 2024-01-01
@@ -11,23 +11,22 @@ updated: 2024-01-01
 
 ## Επισκόπηση
 
-Το Llama-2-Chat-13B είναι η έκδοση 13 δισεκατομμυρίων παραμέτρων του Llama-2-Chat από τη Meta.
+Το Llama-2-Chat-13B είναι ένα μοντέλο 13 δισεκατομμυρίων παραμέτρων από τη Meta με ευθυγράμμιση ασφαλείας.
 
-## Αποτελέσματα Επιθέσεων
+## Ευπάθεια σε Επιθέσεις
 
 | Μέθοδος | Ποσοστό Επιτυχίας |
 |---------|-------------------|
-| Tree of Attacks with Pruning | 14% |
 | GCG | 30% |
-| **Prompt + RS + Self-Transfer** | **100%** |
-
-## Σημειώσεις
-
-- Μεγαλύτερο μοντέλο από το Llama-2-Chat-7B
-- Απαιτεί ξεχωριστή διαδικασία self-transfer για βέλτιστα αποτελέσματα
+| TAP | 14% |
+| PAIR | 15% |
+| **Προτροπή + RS + Self-Transfer (Η δική μας)** | **100%** |
 
 ## Σχετικές Σελίδες
 
 - [[llama-2-chat-7b]]
 - [[llama-2-chat-70b]]
-- [[self-transfer]]
+- [[llama-3-instruct-8b]]
+- [[jailbreaking]]
+- [[adaptive-attacks]]
+- [[meta]]

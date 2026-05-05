@@ -1,37 +1,38 @@
 ---
 type: entity
-title: "Llama-2"
+title: "Llama 2 (70B)"
 tags: ["Sprachmodell", "Open-Source", "Meta", "Chat-Modell", "大型语言模型", "开源模型", "越狱攻击目标", "LLM", "model"]
-related: ["jailbreakbench", "llama-3-70b", "vicuna-13b-v1.5", "llama-guard", "jailbreaking", "renellm", "gpt-3.5", "gpt-4", "越狱提示", "安全对齐", "cold-attack", "mistral", "vicuna", "guanaco", "white-box-attacks", "mixtral"]
-sources: ["Chao 等 - 2024 - JailbreakBench An Open Robustness Benchmark for Jailbreaking Large Language Models.md", "Ding 等 - 2023 - A Wolf in Sheep’s Clothing Generalized Nested Jailbreak Prompts can Fool Large Language Models Easi.md", "Guo 等 - 2024 - COLD-Attack Jailbreaking LLMs with Stealthiness and Controllability.md"]
-created: 2024-12-10
-updated: 2024-12-10
+related: ["jailbreakbench", "llama-3-70b", "vicuna-13b-v1.5", "llama-guard", "jailbreaking", "renellm", "gpt-3.5", "gpt-4", "越狱提示", "安全对齐", "cold-attack", "mistral", "vicuna", "guanaco", "white-box-attacks", "mixtral", "claude-2.0", "mistral-7b"]
+sources: ["Chao 等 - 2024 - JailbreakBench An Open Robustness Benchmark for Jailbreaking Large Language Models.md", "Ding 等 - 2023 - A Wolf in Sheep’s Clothing Generalized Nested Jailbreak Prompts can Fool Large Language Models Easi.md", "Guo 等 - 2024 - COLD-Attack Jailbreaking LLMs with Stealthiness and Controllability.md", "Anil 等 - Many-shot Jailbreaking.md"]
+created: 2024-01-15
+updated: 2024-01-15
 ---
-# Llama-2
+# Llama 2 (70B)
 
-## Überblick
+## Overview
 
-Llama-2 ist eine Familie von Open-Source-Sprachmodellen, entwickelt von Meta. In JailbreakBench werden verschiedene Versionen (7B, 13B) als Zielmodelle für die Evaluierung verwendet.
+Llama 2 (70B) is Meta's 70-billion parameter language model, evaluated in the Many-shot Jailbreaking research. It was found to be susceptible to many-shot jailbreaking attacks.
 
-## Evaluierungsergebnisse
+## Key Findings from Research
 
-### Angriffs-Erfolgsraten
-- PAIR: 0%
-- GCG: 3%
-- JB-Chat: 0%
-- Prompt with RS: 90%
+### Susceptibility
 
-### Ablehnungsrate ohne Verteidigung
-- Llama-2 7B: 65% (oft verweigernd)
+Llama 2 (70B) showed vulnerability to many-shot jailbreaking:
+- Maximum context length of 4096 tokens limited the number of shots
+- Attack effectiveness follows predictable power laws
+- Similar scaling behavior to other models
 
-## Besonderheiten
+## Model Specifications
 
-Llama-2 zeigt eine deutlich höhere Basis-Ablehnungsrate als Vicuna und ist resistenter gegen einige Angriffsmethoden wie PAIR und JB-Chat.
+| Attribute | Value |
+|-----------|-------|
+| Parameters | 70 Billion |
+| Developer | Meta |
+| Max Context | 4096 tokens |
 
-## Verwandte Seiten
+## Related Pages
 
-- [[jailbreakbench]]
-- [[vicuna]]
-- [[gpt-3.5]]
+- [[claude-2.0]]
 - [[gpt-4]]
-- [[mixtral]]
+- [[mistral-7b]]
+- [[many-shot-jailbreaking]]
