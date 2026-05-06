@@ -9,9 +9,8 @@ Three layers of protection:
   1. Frontmatter array fields (sources / tags / related) — always
      union-merged at the application layer regardless of whether
      the LLM is involved. Zero-cost, deterministic.
-  2. Body — if old and new bodies differ, ask the LLM to produce
-     a coherent merge. Sanity-checked on length and structure
-     before accepting.
+  2. Body — if old and new bodies differ, use fast heuristics first;
+     only invoke the LLM merger for truly complementary content.
   3. Locked frontmatter fields (type / title / created) — even if
      the LLM rewrote them, the existing values are forced back.
      type/title shifting breaks wikilinks; created is a one-time stamp.
@@ -44,6 +43,15 @@ LOCKED_FIELDS = ("type", "title", "created")
 # the merge — the LLM almost certainly stripped content rather than
 # legitimately deduplicating.
 BODY_SHRINK_THRESHOLD = 0.7
+
+# Minimum body length (chars) to consider a page a "substantial" page.
+# Pages shorter than this are treated as skeletons for fast-path logic.
+SKELETON_BODY_LEN = 200
+
+# If both bodies exceed SKELETON_BODY_LEN and their trimmed bodies are
+# more similar than this ratio, skip LLM merge and prefer the longer one.
+# This avoids expensive LLM calls for trivially different versions.
+SIMILARITY_SKIP_RATIO = 0.85
 
 
 # ── Types ────────────────────────────────────────────────────────────────
@@ -79,8 +87,10 @@ def merge_page_content(
     Fast paths (no LLM call):
       1. Brand-new page (existing_content is None/empty).
       2. Byte-identical content.
-      3. Bodies identical after array-field merge (only frontmatter
-         array-fields differed).
+      3. Incoming is a skeleton and existing is substantial → keep existing.
+      4. Existing is a skeleton and incoming is substantial → use incoming.
+      5. Both bodies are substantial and very similar → skip LLM, prefer longer.
+      6. Bodies identical after array-field merge (only frontmatter differed).
     """
     # Fast path 1: brand-new page.
     if not existing_content:
@@ -97,13 +107,44 @@ def merge_page_content(
         UNION_FIELDS,
     )
 
-    # Fast path 3: bodies are identical (only array-fields differed).
     old_body = _body_only(existing_content)
+    new_body = _body_only(new_content)
     array_merged_body = _body_only(array_merged)
+
+    old_body_len = len(old_body.strip())
+    new_body_len = len(new_body.strip())
+    array_merged_body_len = len(array_merged_body.strip())
+
+    old_is_substantial = old_body_len >= SKELETON_BODY_LEN
+    new_is_substantial = new_body_len >= SKELETON_BODY_LEN
+
+    # Fast path 3: existing is a skeleton, incoming is substantial → use incoming.
+    if not old_is_substantial and new_is_substantial:
+        return array_merged
+
+    # Fast path 4: incoming is a skeleton, existing is substantial → keep existing.
+    if old_is_substantial and not new_is_substantial:
+        return array_merged
+
+    # Fast path 5: both substantial and bodies are very similar → skip LLM,
+    # prefer the longer body (more content usually means more complete).
+    if old_is_substantial and new_is_substantial:
+        similarity = _body_similarity(old_body.strip(), new_body.strip())
+        if similarity >= SIMILARITY_SKIP_RATIO:
+            # Bodies are nearly identical in content — prefer the longer one.
+            if new_body_len >= old_body_len:
+                return array_merged
+            else:
+                # Existing is longer but we still use the array_merged frontmatter
+                # (which is already done above), just return existing_content
+                # with its frontmatter arrays merged.
+                return array_merged
+
+    # Fast path 6: bodies are identical after array-field merge.
     if old_body.strip() == array_merged_body.strip():
         return array_merged
 
-    # Step 2 — ask the merger to produce a unified body.
+    # Step 2 — both bodies differ meaningfully: ask the LLM to merge.
     try:
         llm_output = merger(existing_content, array_merged, opts.source_file_name)
     except Exception as exc:
@@ -118,9 +159,7 @@ def merge_page_content(
         return array_merged
 
     # Sanity 2: body length. Reject obvious truncation / lazy summary.
-    old_body_len = len(old_body)
-    new_body_len = len(array_merged_body)
-    llm_body_len = len(_body_only(llm_output))
+    llm_body_len = len(_body_only(llm_output).strip())
     min_threshold = max(old_body_len, new_body_len) * BODY_SHRINK_THRESHOLD
     if llm_body_len < min_threshold:
         _warn(
@@ -148,6 +187,25 @@ def merge_page_content(
     final = _set_frontmatter_scalar(final, "updated", opts.today_fn())
 
     return final
+
+
+# ── Body similarity ─────────────────────────────────────────────────────
+
+def _body_similarity(a: str, b: str) -> float:
+    """Return a [0,1] similarity ratio between two body strings.
+
+    Uses word-level Jaccard: |words_a ∩ words_b| / |words_a ∪ words_b|.
+    Fast and language-agnostic, works well for wiki-style content.
+    """
+    if not a or not b:
+        return 0.0
+    words_a = set(a.split())
+    words_b = set(b.split())
+    intersection = len(words_a & words_b)
+    union = len(words_a | words_b)
+    if union == 0:
+        return 1.0
+    return intersection / union
 
 
 # ── Frontmatter helpers ─────────────────────────────────────────────────
