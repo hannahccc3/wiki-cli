@@ -31,7 +31,7 @@ class ProjectLock:
         self._lock = FileLock(str(self.lock_path), timeout=timeout)
 
     def __enter__(self) -> "ProjectLock":
-        self._lock.acquire()
+        self._lock.acquire(timeout=self.timeout)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

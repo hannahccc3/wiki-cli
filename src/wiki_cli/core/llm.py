@@ -20,6 +20,8 @@ Supported providers:
 import os
 import json
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 PROVIDER_PRESETS = {
@@ -181,6 +183,18 @@ class LLMClient:
 
         self.base_url = self.config["base_url"].rstrip("/")
 
+        # Reusable session with retry strategy (handles transient network failures)
+        self._session = requests.Session()
+        retry = Retry(
+            total=3,
+            backoff_factor=2,
+            status_forcelist=(500, 502, 503, 504),
+            allowed_methods=["POST"],
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
+
     # ── Public API ────────────────────────────────────────────────────
 
     def generate(self, prompt: str, system: str = "", max_tokens: int | None = None) -> str:
@@ -239,7 +253,7 @@ class LLMClient:
     def _generate_openai(self, prompt: str, system: str, max_tokens: int | None) -> str:
         url = self._openai_url()
         payload = self._openai_body(prompt, system, max_tokens, stream=False)
-        resp = requests.post(url, headers=self._openai_headers(), json=payload, timeout=600, proxies=self._get_proxies())
+        resp = self._session.post(url, headers=self._openai_headers(), json=payload, timeout=600, proxies=self._get_proxies())
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
@@ -247,7 +261,7 @@ class LLMClient:
     def _stream_openai(self, prompt: str, system: str, max_tokens: int | None):
         url = self._openai_url()
         payload = self._openai_body(prompt, system, max_tokens, stream=True)
-        resp = requests.post(url, headers=self._openai_headers(), json=payload, stream=True, timeout=600, proxies=self._get_proxies())
+        resp = self._session.post(url, headers=self._openai_headers(), json=payload, stream=True, timeout=600, proxies=self._get_proxies())
         resp.raise_for_status()
         for line in resp.iter_lines():
             if not line:
@@ -306,7 +320,7 @@ class LLMClient:
     def _generate_anthropic(self, prompt: str, system: str, max_tokens: int | None) -> str:
         url = self._anthropic_url()
         payload = self._anthropic_body(prompt, system, max_tokens, stream=False)
-        resp = requests.post(url, headers=self._anthropic_headers(), json=payload, timeout=600, proxies=self._get_proxies())
+        resp = self._session.post(url, headers=self._anthropic_headers(), json=payload, timeout=600, proxies=self._get_proxies())
         resp.raise_for_status()
         data = resp.json()
         content = data.get("content", [])
@@ -319,7 +333,7 @@ class LLMClient:
     def _stream_anthropic(self, prompt: str, system: str, max_tokens: int | None):
         url = self._anthropic_url()
         payload = self._anthropic_body(prompt, system, max_tokens, stream=True)
-        resp = requests.post(url, headers=self._anthropic_headers(), json=payload, stream=True, timeout=600, proxies=self._get_proxies())
+        resp = self._session.post(url, headers=self._anthropic_headers(), json=payload, stream=True, timeout=600, proxies=self._get_proxies())
         resp.raise_for_status()
         for line in resp.iter_lines():
             if not line:
@@ -371,7 +385,7 @@ class LLMClient:
     def _generate_google(self, prompt: str, system: str, max_tokens: int | None) -> str:
         url = self._google_url(stream=False)
         payload = self._google_body(prompt, system, max_tokens)
-        resp = requests.post(url, headers=self._google_headers(), json=payload, timeout=600, proxies=self._get_proxies())
+        resp = self._session.post(url, headers=self._google_headers(), json=payload, timeout=600, proxies=self._get_proxies())
         resp.raise_for_status()
         data = resp.json()
         parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
@@ -381,7 +395,7 @@ class LLMClient:
     def _stream_google(self, prompt: str, system: str, max_tokens: int | None):
         url = self._google_url(stream=True)
         payload = self._google_body(prompt, system, max_tokens)
-        resp = requests.post(url, headers=self._google_headers(), json=payload, stream=True, timeout=600, proxies=self._get_proxies())
+        resp = self._session.post(url, headers=self._google_headers(), json=payload, stream=True, timeout=600, proxies=self._get_proxies())
         resp.raise_for_status()
         for line in resp.iter_lines():
             if not line:

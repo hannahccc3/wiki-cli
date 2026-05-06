@@ -467,17 +467,11 @@ class IngestEngine:
         - All pages MUST include `sources` field in frontmatter
         - Pages MUST be written to wiki/entities/, wiki/concepts/, etc.
         """
-        with ProjectLock(self.wiki.project_path):
-            return self._ingest_impl(source_path, collection, merge)
-
-    def _ingest_impl(self, source_path: str, collection: str | None, merge: bool = True) -> dict:
-        """Ingest implementation (called inside ProjectLock)."""
         filename = os.path.basename(source_path)
-
-        # Read source
+        # Read source (fast, no lock needed)
         source_content = self._read_source(source_path)
 
-        # Check cache
+        # Check cache (fast, no lock needed)
         cached = self.cache.check(filename, source_content)
         if cached is not None:
             return {
@@ -487,20 +481,24 @@ class IngestEngine:
                 "analysis": None,
             }
 
-        # Step 1: Analyze (with schema.md and purpose.md as context)
+        # Step 1 & 2: LLM analysis and page generation — run OUTSIDE the lock
+        # to allow concurrent processing of multiple files.
+        # Only the final write + index update needs serialization.
         analysis = self._step1_analyze(source_content, filename)
-
-        # Step 2: Generate pages (with schema.md, purpose.md, index.md, AND original source as context)
-        # Note: nashsu/llm_wiki also passes truncated source content in Step 2 so the LLM
-        # can reference actual passages, not just the analysis summary.
         page_blocks, gen_warnings = self._step2_generate_pages(
             analysis, filename, source_content
         )
 
-        # Write pages (with path safety check + language guard)
-        # Track "hard failures" (OS-level: disk full, permission denied) separately
-        # from "soft drops" (blocked path, empty path) — hard failures must prevent
-        # cache from being saved so re-ingest can retry and recover the failed pages.
+        # Now take the lock only for writing and index updates
+        with ProjectLock(self.wiki.project_path):
+            return self._write_and_finalize(
+                source_path, filename, source_content, analysis, page_blocks, gen_warnings
+            )
+
+    def _write_and_finalize(
+        self, source_path, filename, source_content, analysis, page_blocks, gen_warnings
+    ) -> dict:
+        """Write pages, update index/log, save cache. Called inside ProjectLock."""
         output_paths: list[str] = []
         blocked_paths: list[str] = []
         hard_failures: list[str] = []
@@ -554,7 +552,7 @@ class IngestEngine:
                 if existing_content:
                     # Build the LLM merger function for this file.
                     def make_merger(path: str):
-                        def merger(existing: str, incoming: str, source_fn: str) -> str:
+                        def merger(existing: str, incoming: str, source_fn: str, *, _path: str = path) -> str:
                             merge_prompt = f"""You are a wiki page merger. Two versions of the same wiki page are provided.
 Merge them into a single coherent page. Preserve all valuable information from both versions.
 Keep the frontmatter from the existing version (type, title, created, updated, sources, tags, related).
