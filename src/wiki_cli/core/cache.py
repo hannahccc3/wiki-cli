@@ -1,8 +1,9 @@
-"""SHA256-based ingest cache with file-existence verification.
+"""Ingest cache keyed by source filename only.
 
-Cache design (nashsu/llm_wiki style):
-- Keyed by source filename + content hash
-- Cache hit is only returned if EVERY previously-written output file
+Cache design:
+- Keyed by source filename (e.g. "paper.pdf"). The content hash is stored
+  INSIDE each entry — it is NOT part of the cache key.
+- On check(): verifies (a) content hash matches AND (b) every output file
   still exists on disk. This prevents ghost entries (stale paths where
   files were manually deleted but cache still lists them).
 - Each entry stores: hash, timestamp, output_paths
