@@ -648,12 +648,18 @@ Output ONLY the merged wiki page content (frontmatter + body), no explanation.
             pass
 
         # Save cache only when ALL writes succeeded (no hard failures).
-        # If any block failed to write (OS error), skip cache so re-ingest retries.
+        # If any block failed to write (OS error), OR any block was skipped due to
+        # language mismatch or path blocking, skip cache so re-ingest can recover those pages.
         if hard_failures:
             import sys
             print(f"⚠ Hard failures during ingest — skipping cache save for '{filename}':", file=sys.stderr)
             for hf in hard_failures:
                 print(f"  • {hf}", file=sys.stderr)
+        elif blocked_paths or language_mismatches:
+            # Some pages were intentionally skipped — do not cache partial results
+            import sys
+            skipped = len(blocked_paths) + len(language_mismatches)
+            print(f"⚠ {skipped} page(s) skipped (language/blocked) — skipping cache save for '{filename}'", file=sys.stderr)
         else:
             self.cache.save(filename, source_content, output_paths)
 
@@ -679,7 +685,7 @@ Output ONLY the merged wiki page content (frontmatter + body), no explanation.
         }
 
     def _append_log(self, filename: str, analysis: dict, output_paths: list[str]):
-        """Append to ingest log."""
+        """Append to ingest log with fsync for crash durability."""
         log_path = Path(self.wiki.project_path) / ".llm-wiki" / "ingest-log.jsonl"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
@@ -689,8 +695,11 @@ Output ONLY the merged wiki page content (frontmatter + body), no explanation.
             "pages": output_paths,
             "confidence": analysis.get("confidence", 0),
         }
+        entry_line = json.dumps(entry, ensure_ascii=False) + "\n"
         with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.write(entry_line)
+            f.flush()
+            os.fsync(f.fileno())  # guarantee write hits disk before returning
 
 
 def parse_file_blocks(text: str) -> tuple[list[ParsedBlock], list[str]]:

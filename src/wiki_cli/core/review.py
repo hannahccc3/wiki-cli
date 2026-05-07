@@ -56,8 +56,10 @@ class ReviewSystem:
             search_queries: Pre-generated queries for verification
             details: Additional context
         """
+        import secrets
+        unique_suffix = secrets.token_hex(3)
         item = {
-            "id": f"rev-{datetime.now().strftime('%Y%m%d%H%M%S')}-{page_slug[:20]}",
+            "id": f"rev-{datetime.now().strftime('%Y%m%d%H%M%S')}-{unique_suffix}-{page_slug[:16]}",
             "type": item_type,
             "page_slug": page_slug,
             "reason": reason,

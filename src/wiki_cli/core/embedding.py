@@ -104,7 +104,12 @@ class EmbeddingClient:
         self.model = cfg["model"]
         self.api_key = cfg.get("api_key", "")
         self.dimensions = cfg.get("dimensions", 768)
-        self._is_ollama = "localhost:11434" in self.base_url or "127.0.0.1:11434" in self.base_url
+        self._is_ollama = (
+            "localhost:11434" in self.base_url
+            or "127.0.0.1:11434" in self.base_url
+            or self.base_url.endswith(":11434")
+            or self.base_url.endswith(":11434/")
+        )
 
     def embed(self, text: str) -> List[float] | None:
         """Get embedding vector for a single text."""

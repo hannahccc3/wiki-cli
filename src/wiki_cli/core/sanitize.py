@@ -127,6 +127,10 @@ def repair_wikilink_lists_in_frontmatter(content: str) -> str:
         repaired_lines.append(repaired_line)
     
     repaired_body = '\n'.join(repaired_lines)
-    fm_start = content[:match.start()]
+    # NOTE: match.start() is always 0 here since the regex starts with ^---,
+    # so fm_start is always "". This is harmless — the output is correct.
+    # Known limitation: if frontmatter content contains a literal "---" line
+    # (rare, e.g. a tag value like "tags: [a] --- note"), the lazy [\s\S]*?
+    # will incorrectly treat the first --- as the closing delimiter.
     body = content[match.end():]  # preserve body content after frontmatter
-    return f'{fm_start}---\n{repaired_body}\n---{after_fm}{body}'
+    return f'---\n{repaired_body}\n---{after_fm}{body}'

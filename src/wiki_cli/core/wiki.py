@@ -558,7 +558,10 @@ class WikiManager:
             lines.append("")
 
         index_path = self.project_path / "wiki" / "index.md"
-        index_path.write_text("\n".join(lines), encoding="utf-8")
+        content = "\n".join(lines)
+        tmp_path = index_path.with_suffix(".md.tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.rename(index_path)  # atomic on POSIX
         return str(index_path)
 
     def append_log(self, action: str, subject: str, details: str = "") -> None:
@@ -579,6 +582,8 @@ class WikiManager:
 
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(entry)
+            f.flush()
+            os.fsync(f.fileno())
 
     # ── Overview ────────────────────────────────────────────────────────
 
@@ -616,7 +621,10 @@ class WikiManager:
             "---\n"
         )
         overview_path = self.project_path / "wiki" / "overview.md"
-        overview_path.write_text(fm + "\n# Overview\n\n" + content.replace("## Overview\n\n", ""), encoding="utf-8")
+        overview_content = fm + "\n# Overview\n\n" + content.replace("## Overview\n\n", "")
+        tmp_path = overview_path.with_suffix(".md.tmp")
+        tmp_path.write_text(overview_content, encoding="utf-8")
+        tmp_path.rename(overview_path)  # atomic on POSIX
         return str(overview_path)
 
     # ── Listing & Stats ─────────────────────────────────────────────────
